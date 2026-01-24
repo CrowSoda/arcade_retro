@@ -142,10 +142,17 @@ class WaterfallBuffer:
         Args:
             db_row: 1D numpy array of dB values, length must equal self.width or will be resampled
         """
-        # Resample if needed
+        # Resample if needed using max-pooling (preserves signal peaks)
         if len(db_row) != self.width:
-            indices = np.linspace(0, len(db_row) - 1, self.width).astype(int)
-            db_row = db_row[indices]
+            stride = len(db_row) // self.width
+            if stride > 1:
+                # Max-pooling: take max of each group
+                truncated_len = self.width * stride
+                db_row = db_row[:truncated_len].reshape(self.width, stride).max(axis=1)
+            else:
+                # Upsampling case - use interpolation
+                indices = np.linspace(0, len(db_row) - 1, self.width).astype(int)
+                db_row = db_row[indices]
         
         # Update noise floor estimate (exponential moving average of median)
         median_db = np.median(db_row)

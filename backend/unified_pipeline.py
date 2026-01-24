@@ -182,8 +182,8 @@ class TripleBufferedPipeline:
         # =====================================================
         # WATERFALL PARAMS - FOR DISPLAY ONLY (fast)
         # =====================================================
-        self.waterfall_fft_size = 8192
-        self.waterfall_hop = 4096  # 50% overlap - FAST
+        self.waterfall_fft_size = 32768  # 4× better frequency resolution (610 Hz/bin)
+        self.waterfall_hop = 16384  # 50% overlap
         self.waterfall_dynamic_range = 60.0  # Better contrast for display
         
         # Noise floor tracking (exponential moving average)
@@ -202,7 +202,7 @@ class TripleBufferedPipeline:
         
         # TWO SEPARATE WINDOWS
         self.inference_window = torch.hann_window(self.inference_fft_size, device=self.device)
-        self.waterfall_window = np.hanning(8192).astype(np.float32)
+        self.waterfall_window = np.hanning(32768).astype(np.float32)
         
         self.class_names = ['background', 'creamy_chicken']
         
@@ -311,28 +311,40 @@ class TripleBufferedPipeline:
             'stream_idx': stream_idx,
         }
     
-    def compute_waterfall_row(self, iq_data: np.ndarray) -> np.ndarray:
-        """WATERFALL display - returns dB values."""
-        fft_size = self.waterfall_fft_size  # 4096
+    def compute_waterfall_rows(self, iq_data: np.ndarray) -> np.ndarray:
+        """
+        Compute STFT spectrogram - returns MULTIPLE rows, one per time slice.
+        Each row is a full FFT, preserving both time and frequency resolution.
+        """
+        fft_size = self.waterfall_fft_size  # 8192
+        hop_size = fft_size // 2  # 50% overlap = 4096
         
-        # Take last chunk
-        if len(iq_data) >= fft_size:
-            segment = iq_data[-fft_size:]
-        else:
-            segment = np.pad(iq_data, (0, fft_size - len(iq_data)))
+        # Calculate number of complete FFTs we can do
+        num_ffts = (len(iq_data) - fft_size) // hop_size + 1
         
-        # Window
-        segment = segment * self.waterfall_window
+        if num_ffts < 1:
+            # Not enough data for even one FFT
+            return np.array([])
         
-        # FFT
-        fft_data = np.fft.fft(segment)
-        fft_data = np.fft.fftshift(fft_data)
+        # Pre-allocate output
+        rows = np.zeros((num_ffts, fft_size), dtype=np.float32)
         
-        # Magnitude to dB
-        mag = np.abs(fft_data)
-        db = 20 * np.log10(mag + 1e-6)
+        for i in range(num_ffts):
+            start = i * hop_size
+            segment = iq_data[start:start + fft_size]
+            
+            # Window
+            segment = segment * self.waterfall_window
+            
+            # FFT
+            fft_data = np.fft.fft(segment)
+            fft_data = np.fft.fftshift(fft_data)
+            
+            # Magnitude to dB
+            mag = np.abs(fft_data)
+            rows[i] = 20 * np.log10(mag + 1e-10)
         
-        return db.astype(np.float32)
+        return rows  # Shape: (num_ffts, fft_size)
     
     def compute_waterfall_row_rgba(self, iq_data: np.ndarray, target_width: int = 1024) -> tuple:
         """
@@ -356,9 +368,14 @@ class TripleBufferedPipeline:
         # Magnitude to dB
         db = 20 * np.log10(np.abs(fft_data) + 1e-6)
         
-        # Downsample to target width (fast strided access)
+        # Max-pooling instead of decimation (preserves signal peaks)
         stride = fft_size // target_width
-        db_downsampled = db[::stride][:target_width].astype(np.float32)
+        if stride > 1:
+            # Reshape to (target_width, stride) and take max of each group
+            truncated_len = target_width * stride
+            db_downsampled = db[:truncated_len].reshape(target_width, stride).max(axis=1).astype(np.float32)
+        else:
+            db_downsampled = db[:target_width].astype(np.float32)
         
         # Update noise floor (median, tracked over time)
         current_median = np.median(db_downsampled)
@@ -406,8 +423,13 @@ class WaterfallOnlyPipeline:
         fft_data = np.fft.fftshift(np.fft.fft(segment))
         db = 20 * np.log10(np.abs(fft_data) + 1e-6)
         
+        # Max-pooling instead of decimation (preserves signal peaks)
         stride = fft_size // target_width
-        db_downsampled = db[::stride][:target_width].astype(np.float32)
+        if stride > 1:
+            truncated_len = target_width * stride
+            db_downsampled = db[:truncated_len].reshape(target_width, stride).max(axis=1).astype(np.float32)
+        else:
+            db_downsampled = db[:target_width].astype(np.float32)
         
         current_median = np.median(db_downsampled)
         self.noise_floor_db = self.noise_alpha * current_median + (1 - self.noise_alpha) * self.noise_floor_db
@@ -676,9 +698,12 @@ class VideoStreamServer:
                 
                 self.current_pts = chunk.pts
                 
-                # Compute dB row and add to waterfall buffer
-                db_row = self.pipeline.compute_waterfall_row(chunk.data)
-                self.waterfall_buffer.add_row(db_row)
+                # Compute STFT - get high-res spectrum, but add only 1 row per frame (real-time)
+                db_rows = self.pipeline.compute_waterfall_rows(chunk.data)
+                if len(db_rows) > 0:
+                    # Average all rows for best SNR, or use last row
+                    avg_row = np.mean(db_rows, axis=0)
+                    self.waterfall_buffer.add_row(avg_row)
                 
                 # Get rendered frame WITH detection boxes burned in
                 rgb_frame = self.waterfall_buffer.get_frame_with_detections(self.latest_detections)
