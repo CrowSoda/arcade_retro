@@ -1,0 +1,159 @@
+# G20 Demo - Git Ignore
+# ======================
+
+# Old/disabled git folders
+.git_disabled/
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+*.lock
+!pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.mypy_cache/
+.pytest_cache/
+venv/
+.venv/
+ENV/
+env/
+
+# ======================
+# PROJECT-SPECIFIC DATA (LARGE FILES - DO NOT COMMIT)
+# ======================
+
+# DATA FOLDER - 200GB+ total, distribute separately
+data/
+
+# Map data - PMTiles (133GB+ planet file)
+data/map/*.pmtiles
+data/map/*.mbtiles
+
+# IQ Signal Data - SigMF captures (70GB+)
+data/*.sigmf-data
+data/*.sigmf-meta
+
+# RF Captures (500MB+ each)
+data/captures/
+*.rfcap
+
+# Trained Models - distribute via releases (100MB+)
+models/
+models/*.pth
+models/*.pt
+models/*.onnx
+models/*.trt
+models/*.engine
+
+# ======================
+# LARGE FILES (General)
+# ======================
+
+# Binary data files
+*.bin
+*.dat
+*.raw
+*.iq
+
+# Compressed archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Video/Audio
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.mp3
+
+# Image datasets
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# ======================
+# BUILD ARTIFACTS
+# ======================
+
+# Windows build
+windows/flutter/ephemeral/
+windows/x64/
+*.exe
+*.dll
+*.pdb
+
+# Linux build
+linux/flutter/ephemeral/
+linux/build/
+
+# macOS build  
+macos/Flutter/ephemeral/
+macos/build/
+*.app
+*.dmg
+
+# Android (if ever needed)
+android/.gradle/
+android/app/build/
+android/build/
+*.apk
+*.aab
+
+# iOS (if ever needed)
+ios/.symlinks/
+ios/Flutter/Flutter.framework/
+ios/Flutter/Flutter.podspec
+ios/build/
+*.ipa
+
+# Coverage
+coverage/
+.coverage
+*.lcov
+
+# Test
+.test_coverage/
+
+# Logs
+*.log
+logs/

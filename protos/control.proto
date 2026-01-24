@@ -1,0 +1,163 @@
+// control.proto - RF Device Control Service
+// G20 Demo Backend - Standalone
+
+syntax = "proto3";
+
+package g20;
+
+option go_package = "github.com/g20_demo/proto";
+
+// Device Control Service - manages SDR hardware (NV100)
+service DeviceControl {
+  // Tuning commands
+  rpc SetFrequency(FrequencyRequest) returns (FrequencyResponse);
+  rpc SetBandwidth(BandwidthRequest) returns (BandwidthResponse);
+  rpc SetGain(GainRequest) returns (GainResponse);
+  
+  // Capture commands
+  rpc StartCapture(CaptureRequest) returns (CaptureResponse);
+  rpc StopCapture(StopRequest) returns (StopResponse);
+  
+  // Status
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc GetDeviceInfo(DeviceInfoRequest) returns (DeviceInfoResponse);
+  
+  // Mode control
+  rpc SetMode(ModeRequest) returns (ModeResponse);
+}
+
+// ============= Tuning Messages =============
+
+message FrequencyRequest {
+  double center_freq_mhz = 1;  // 30 - 6000 MHz for NV100
+  int32 rx_channel = 2;        // 1 or 2
+}
+
+message FrequencyResponse {
+  bool success = 1;
+  string error_message = 2;
+  double actual_freq_mhz = 3;
+}
+
+message BandwidthRequest {
+  double bandwidth_mhz = 1;    // 0.1 - 50 MHz for NV100
+  int32 rx_channel = 2;
+}
+
+message BandwidthResponse {
+  bool success = 1;
+  string error_message = 2;
+  double actual_bw_mhz = 3;
+}
+
+message GainRequest {
+  double gain_db = 1;          // 0 - 34 dB for NV100
+  int32 rx_channel = 2;
+}
+
+message GainResponse {
+  bool success = 1;
+  string error_message = 2;
+  double actual_gain_db = 3;
+}
+
+// ============= Capture Messages =============
+
+message CaptureRequest {
+  string signal_name = 1;
+  int32 duration_seconds = 2;
+  int32 rx_channel = 3;
+  optional double box_x1 = 4;
+  optional double box_y1 = 5;
+  optional double box_x2 = 6;
+  optional double box_y2 = 7;
+}
+
+message CaptureResponse {
+  bool success = 1;
+  string error_message = 2;
+  string capture_id = 3;
+  string file_path = 4;
+}
+
+message StopRequest {
+  string capture_id = 1;
+}
+
+message StopResponse {
+  bool success = 1;
+  string error_message = 2;
+  string file_path = 3;
+  int64 bytes_captured = 4;
+}
+
+// ============= Status Messages =============
+
+message StatusRequest {}
+
+message StatusResponse {
+  DeviceState state = 1;
+  double temperature_c = 2;
+  repeated ChannelStatus channels = 3;
+  double cpu_usage_percent = 4;
+  double gpu_usage_percent = 5;
+  int64 memory_used_bytes = 6;
+  int64 disk_free_bytes = 7;
+}
+
+message ChannelStatus {
+  int32 channel_number = 1;
+  double center_freq_mhz = 2;
+  double bandwidth_mhz = 3;
+  double gain_db = 4;
+  ChannelState state = 5;
+  string active_capture_id = 6;
+}
+
+enum DeviceState {
+  DEVICE_DISCONNECTED = 0;
+  DEVICE_CONNECTING = 1;
+  DEVICE_CONNECTED = 2;
+  DEVICE_ERROR = 3;
+}
+
+enum ChannelState {
+  CHANNEL_IDLE = 0;
+  CHANNEL_SCANNING = 1;
+  CHANNEL_CAPTURING = 2;
+  CHANNEL_ERROR = 3;
+}
+
+message DeviceInfoRequest {}
+
+message DeviceInfoResponse {
+  string device_name = 1;
+  string serial_number = 2;
+  string firmware_version = 3;
+  string api_version = 4;
+  double min_freq_mhz = 5;
+  double max_freq_mhz = 6;
+  double max_bandwidth_mhz = 7;
+  double max_gain_db = 8;
+  int32 num_rx_channels = 9;
+  int32 num_tx_channels = 10;
+}
+
+// ============= Mode Messages =============
+
+message ModeRequest {
+  OperatingMode mode = 1;
+  optional int32 timeout_seconds = 2;
+}
+
+message ModeResponse {
+  bool success = 1;
+  string error_message = 2;
+  OperatingMode current_mode = 3;
+}
+
+enum OperatingMode {
+  MODE_AUTO_SCAN = 0;
+  MODE_MANUAL = 1;
+  MODE_SENSE_ONLY = 2;
+}

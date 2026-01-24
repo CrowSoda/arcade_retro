@@ -1,0 +1,16 @@
+# Canonical Spectrogram Configuration
+# SINGLE SOURCE OF TRUTH - All downstream consumers use these settings
+# DO NOT MODIFY IN PRODUCTION without coordinated update to all components
+
+fft_size: 4096
+window: hann
+overlap: 0.5
+sample_rate_hz: 20000000.0  # 20 MSps
+
+# Normalization
+psd_ref_dbm: -30.0
+dynamic_range_db: 80.0  # CRITICAL: Must match TENSORCADE (was 60, now 80)
+
+# Display
+colormap: viridis
+target_width: 1024  # Output width after downsampling

@@ -1,0 +1,1261 @@
+G20/NV100 Real-Time RF Waterfall Detection System
+Implementation Roadmap v1.0
+
+Executive Summary
+Build a real-time RF signal detection and visualization system for the Epic G20 platform with NV100 SDR running on NVIDIA Orin NX. The system detects signals on a live waterfall display and overlays tracked detections without obscuring the underlying signal.
+Core principle: State of the art is defined by architectural invariants, not model choice. Get the invariants right first; optimize later.
+End-to-end latency target: ≤100ms from IQ capture to screen.
+
+Part 1: Architectural Invariants (Non-Negotiable)
+These are hard constraints. Every implementation decision must preserve them.
+InvariantRuleViolation SymptomOne canonical spectrogramSingle FFT size, window, overlap, PSD normalization. Inference sees spatial transform of display data, never re-FFT.Box drift, "box doesn't match signal" complaintsFrame-ID is identityMonotonic integer, never reset. All detections/tracks reference frame_id, not wall-clock time.Non-deterministic replay, sync bugsTracking-by-detectionUI renders tracks, never raw detections. Tracks have lifecycle states.Flicker, jitter, operator distrustMinimal-occlusion overlayCorner markers, 0% fill default. Attributes encoded via stroke/saturation/dash.Obscured signals, operator complaintsDeterministic latencyInference cadence decoupled from display cadence. Bounded jitter over max throughput.Unpredictable UX, debugging nightmare
+
+Part 2: System Architecture
+2.1 Data Flow Diagram
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              NV100 SDR                                      │
+│                         (libsidekiq, 20 MSps)                               │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │ IQ samples (GPU DMA)
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CANONICAL SPECTROGRAM GENERATOR (GPU)                    │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌────────────────┐  │
+│  │ Ring Buffer │ → │ FFT (cuFFT) │ → │ PSD (dB)    │ → │ Normalize/Scale│  │
+│  │ (IQ)        │   │ 4096-point  │   │ 20log10     │   │ to 0-255       │  │
+│  └─────────────┘   └─────────────┘   └─────────────┘   └───────┬────────┘  │
+│                                                                 │           │
+│                              SpectrogramFrame                   │           │
+│                              {frame_id, gpu_buffer, metadata}   │           │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                ┌─────────────────┼─────────────────┬─────────────────┐
+                ▼                 ▼                 ▼                 ▼
+        ┌───────────────┐ ┌─────────────┐ ┌───────────────┐ ┌───────────────┐
+        │ Display Path  │ │ Inference   │ │ Recording     │ │ Database      │
+        │ (30 fps)      │ │ (10-15 fps) │ │ (async)       │ │ (async batch) │
+        └───────┬───────┘ └──────┬──────┘ └───────────────┘ └───────────────┘
+                │                │
+                │                ▼
+                │         ┌─────────────┐
+                │         │ YOLOv8s     │
+                │         │ TensorRT    │
+                │         └──────┬──────┘
+                │                │ Detections
+                │                ▼
+                │         ┌─────────────┐
+                │         │ Tracker     │
+                │         │ (IoU + EMA) │
+                │         └──────┬──────┘
+                │                │ Tracks
+                │                ▼
+                ▼         ┌─────────────┐
+        ┌───────────────┐ │ Track State │
+        │ Flutter UI    │◄┤ Publisher   │
+        │               │ └─────────────┘
+        │ ┌───────────┐ │
+        │ │ Waterfall │ │
+        │ │ Widget    │ │
+        │ ├───────────┤ │
+        │ │ Track     │ │
+        │ │ Overlay   │ │
+        │ └───────────┘ │
+        └───────────────┘
+2.2 Component Boundaries
+ComponentRuns OnLanguageResponsibilityIQ CaptureGPU DMAC/libsidekiqRing buffer fillSpectrogram GenGPUPython/CuPyFFT, PSD, normalize, frame packagingInferenceGPUPython/TensorRTDetection on pooled spectrogramTrackerCPUPythonAssociation, smoothing, lifecycleTransportCPUPythonZMQ internal, WebSocket externalFlutter UICPU/GPUDartWaterfall render, track overlayDatabaseCPUPython/asyncpgAsync batch logging
+2.3 GPU/CPU Boundary
+GPU-RESIDENT:
+├── IQ ring buffer
+├── FFT computation (cuFFT)
+├── PSD calculation
+├── Normalization
+├── Inference tensor (pooled from canonical)
+└── YOLOv8s TensorRT inference
+
+CPU-BOUND (v1, acceptable):
+├── Frame metadata assembly
+├── Detection post-processing
+├── Tracker state machine
+├── WebSocket serialization
+├── Flutter texture upload (GPU→CPU copy, ~1MB/frame)
+└── Database batching
+
+v2 OPTIMIZATION (later):
+└── External texture path eliminates Flutter GPU→CPU copy
+
+Part 3: Data Contracts
+3.1 SpectrogramFrame
+pythonfrom dataclasses import dataclass
+from typing import Optional
+import numpy as np
+
+@dataclass
+class SpectrogramFrame:
+    # Identity
+    frame_id: int                    # Monotonic, never reset, primary key
+    
+    # Timing (metadata only, not for sync)
+    timestamp_ns: int                # Device monotonic clock
+    pts: float                       # Presentation timestamp (legacy compat)
+    
+    # FFT configuration (hash for change detection)
+    fft_config_hash: int             # Hash of (fft_size, window, overlap, normalization)
+    
+    # Frequency span
+    freq_start_hz: float
+    freq_end_hz: float
+    sample_rate_hz: float
+    
+    # Data reference (not the data itself)
+    gpu_buffer_id: int               # For zero-copy paths
+    width: int                       # FFT bins (e.g., 4096)
+    height: int                      # Rows in this frame (typically 1)
+    
+    # Optional CPU copy (v1 only)
+    rgba_bytes: Optional[bytes] = None
+    psd_db: Optional[np.ndarray] = None
+3.2 Detection (raw, internal only)
+python@dataclass
+class Detection:
+    frame_id: int                    # Source frame reference
+    class_id: int
+    class_name: str
+    confidence: float                # 0.0 - 1.0
+    box: tuple[float, float, float, float]  # x1, y1, x2, y2 normalized 0-1
+    
+    # Derived RF parameters
+    freq_center_hz: float
+    freq_bandwidth_hz: float
+3.3 Track (rendered to UI)
+python@dataclass
+class Track:
+    # Identity
+    track_id: int                    # Unique across session
+    
+    # Classification
+    class_id: int
+    class_name: str
+    
+    # Position (in canonical spectrogram space, normalized 0-1)
+    truth_box: tuple[float, float, float, float]   # Actual tracked position
+    display_box: tuple[float, float, float, float] # Smoothed for rendering
+    
+    # Confidence
+    confidence: float                # Accumulated, not per-frame
+    
+    # Lifecycle
+    state: str                       # 'tentative' | 'confirmed' | 'lost'
+    age_frames: int                  # Frames since last detection match
+    hits: int                        # Total matched detections
+    
+    # Motion (optional, for drift handling)
+    motion_mode: str                 # 'stationary' | 'drifting'
+    drift_rate_hz_per_sec: float     # Estimated drift rate
+    drift_confidence: float          # Confidence in drift estimate
+    
+    # RF parameters
+    freq_center_hz: float
+    freq_bandwidth_hz: float
+    
+    # Timestamps (metadata)
+    first_seen_frame_id: int
+    last_seen_frame_id: int
+3.4 TrackUpdate (sent to UI)
+python@dataclass
+class TrackUpdate:
+    frame_id: int                    # Reference to source spectrogram frame
+    timestamp_ns: int                # For logging
+    tracks: list[Track]              # All active tracks
+    
+    # Statistics
+    total_detections: int            # Raw detections this frame
+    inference_latency_ms: float
+    tracker_latency_ms: float
+```
+
+### 3.5 Wire Protocol (Binary WebSocket)
+```
+Message Header (8 bytes):
+├── type: uint8          # 0x01=Frame, 0x02=TrackUpdate, 0x03=Status
+├── flags: uint8         # Reserved
+├── length: uint32       # Payload length
+└── frame_id: uint32     # Reference frame
+
+TrackUpdate Payload:
+├── track_count: uint16
+├── inference_latency_ms: float32
+├── tracker_latency_ms: float32
+└── tracks[]: 
+    ├── track_id: uint32
+    ├── class_id: uint16
+    ├── confidence: float32
+    ├── state: uint8 (0=tentative, 1=confirmed, 2=lost)
+    ├── display_box: float32[4] (x1, y1, x2, y2)
+    ├── freq_center_hz: float64
+    ├── freq_bandwidth_hz: float64
+    └── motion_mode: uint8 (0=stationary, 1=drifting)
+
+Part 4: Latency Budget
+Target: ≤100ms end-to-end (IQ capture to pixels on screen)
+StageTargetNotesIQ capture → GPU buffer≤5msDMA, ring bufferFFT + PSD + normalize≤3mscuFFT 4096-pointGPU→CPU frame copy≤2ms1MB RGBA (v1 only)Inference (YOLOv8s INT8)≤15msAt 10-15 FPS cadenceDetection post-process≤1msNMS already done in modelTracker update≤2msSimple IoU + EMAWebSocket serialize + send≤5msBinary protocol, localFlutter decode + render≤15msdecodeImageFromPixels + paintDisplay vsync≤16ms60 FPS displayTotal≤64ms typicalBudget has 36ms headroom
+Measurement points (instrument these):
+
+t0: IQ buffer timestamp (device clock)
+t1: Frame packaging complete
+t2: Inference complete
+t3: Tracker update complete
+t4: WebSocket send complete
+t5: Flutter frame rendered (if measurable)
+
+
+Part 5: Implementation Tasks (v1)
+Phase 1: Canonical Spectrogram Pipeline (Week 1-2)
+Goal: Single source of truth for all downstream consumers.
+Task 1.1: Unify FFT Configuration
+python# config.py
+@dataclass
+class SpectrogramConfig:
+    fft_size: int = 4096
+    window: str = 'hann'
+    overlap: float = 0.5
+    psd_ref_dbm: float = -30.0
+    dynamic_range_db: float = 60.0
+    colormap: str = 'viridis'
+    
+    def hash(self) -> int:
+        return hash((self.fft_size, self.window, self.overlap, 
+                     self.psd_ref_dbm, self.dynamic_range_db))
+Acceptance criteria:
+
+ Single SpectrogramConfig instance used by all components
+ Config hash included in every SpectrogramFrame
+ Changing config triggers clear warning/reset
+
+Task 1.2: Implement Frame Generator
+python# spectrogram_generator.py
+class CanonicalSpectrogramGenerator:
+    def __init__(self, config: SpectrogramConfig):
+        self.config = config
+        self.frame_id = 0
+        self._init_gpu_resources()
+    
+    def process_iq(self, iq_samples: np.ndarray, timestamp_ns: int) -> SpectrogramFrame:
+        """
+        Generate one canonical spectrogram frame.
+        All downstream views derive from this.
+        """
+        # FFT on GPU
+        psd_db = self._compute_psd_gpu(iq_samples)
+        
+        # Normalize to 0-255
+        normalized = self._normalize(psd_db)
+        
+        # Apply colormap
+        rgba = self._apply_colormap(normalized)
+        
+        # Package frame
+        frame = SpectrogramFrame(
+            frame_id=self.frame_id,
+            timestamp_ns=timestamp_ns,
+            fft_config_hash=self.config.hash(),
+            # ... other fields
+            rgba_bytes=rgba.tobytes(),
+            psd_db=psd_db,
+        )
+        
+        self.frame_id += 1
+        return frame
+Task 1.3: Inference Input Derivation
+python# inference_pipeline.py
+class InferencePipeline:
+    def __init__(self, model_path: str, input_size: tuple = (640, 640)):
+        self.input_size = input_size
+        self.engine = self._load_tensorrt_engine(model_path)
+    
+    def prepare_input(self, frame: SpectrogramFrame) -> np.ndarray:
+        """
+        Derive inference input from canonical spectrogram.
+        SPATIAL TRANSFORM ONLY - no re-FFT.
+        """
+        # Resize canonical spectrogram to model input size
+        # Use area interpolation for downsampling (preserves energy)
+        psd_resized = cv2.resize(
+            frame.psd_db, 
+            self.input_size, 
+            interpolation=cv2.INTER_AREA
+        )
+        
+        # Normalize for model
+        tensor = self._normalize_for_model(psd_resized)
+        return tensor
+Acceptance criteria:
+
+ Inference input is derived from canonical frame, never recomputed
+ Box coordinates from inference map correctly back to canonical space
+ Visual test: detection boxes align with visible signals
+
+
+Phase 2: Tracker Implementation (Week 2-3)
+Goal: Stable tracks with no flicker, optional drift handling.
+Task 2.1: Core Tracker
+python# tracker.py
+from dataclasses import dataclass, field
+from typing import Optional
+import numpy as np
+
+@dataclass
+class TrackState:
+    track_id: int
+    class_id: int
+    class_name: str
+    
+    # Boxes (canonical space, normalized 0-1)
+    truth_box: np.ndarray           # Updated by detection matching
+    display_box: np.ndarray         # Smoothed for rendering
+    
+    # Confidence
+    confidence: float
+    
+    # Lifecycle
+    state: str = 'tentative'        # tentative | confirmed | lost
+    age: int = 0                    # Frames since last match
+    hits: int = 1                   # Total matches
+    
+    # Drift detection (optional)
+    motion_mode: str = 'stationary'
+    velocity: np.ndarray = field(default_factory=lambda: np.zeros(4))
+    drift_evidence: int = 0         # Consecutive frames with consistent drift
+
+
+class RFSignalTracker:
+    """
+    Production tracker for RF signals.
+    Implements: IoU + frequency association, EMA smoothing, 
+    confidence accumulation, optional drift detection.
+    """
+    
+    def __init__(
+        self,
+        # Association
+        iou_threshold: float = 0.2,
+        freq_tolerance_normalized: float = 0.02,
+        
+        # Lifecycle
+        confirm_hits: int = 3,
+        max_age: int = 10,
+        
+        # Smoothing
+        box_ema_alpha: float = 0.3,
+        display_ema_alpha: float = 0.5,
+        conf_rise_alpha: float = 0.3,
+        conf_fall_alpha: float = 0.05,
+        
+        # Drift detection (optional)
+        enable_drift_detection: bool = False,
+        drift_frames_required: int = 5,
+        drift_min_displacement: float = 0.005,  # Normalized units
+    ):
+        self.iou_thresh = iou_threshold
+        self.freq_tol = freq_tolerance_normalized
+        self.confirm_hits = confirm_hits
+        self.max_age = max_age
+        self.box_alpha = box_ema_alpha
+        self.display_alpha = display_ema_alpha
+        self.conf_rise = conf_rise_alpha
+        self.conf_fall = conf_fall_alpha
+        
+        self.enable_drift = enable_drift_detection
+        self.drift_frames = drift_frames_required
+        self.drift_min_disp = drift_min_displacement
+        
+        self.tracks: dict[int, TrackState] = {}
+        self.next_id = 0
+    
+    def update(self, detections: list[Detection], frame_id: int) -> list[Track]:
+        """
+        Main entry point. Call once per inference frame.
+        Returns list of tracks for UI rendering.
+        """
+        det_used = [False] * len(detections)
+        
+        # 1. Match existing tracks to detections
+        for track in self.tracks.values():
+            best_idx = self._find_best_match(track, detections, det_used)
+            if best_idx is not None:
+                det_used[best_idx] = True
+                self._update_matched_track(track, detections[best_idx])
+            else:
+                self._age_unmatched_track(track)
+        
+        # 2. Create new tracks for unmatched detections
+        for i, det in enumerate(detections):
+            if not det_used[i]:
+                self._create_track(det, frame_id)
+        
+        # 3. Prune lost tracks
+        self.tracks = {
+            tid: t for tid, t in self.tracks.items() 
+            if t.state != 'lost'
+        }
+        
+        # 4. Convert to output format
+        return self._export_tracks(frame_id)
+    
+    def _find_best_match(
+        self, 
+        track: TrackState, 
+        detections: list[Detection],
+        det_used: list[bool]
+    ) -> Optional[int]:
+        """Find best matching detection for a track."""
+        best_idx = None
+        best_score = 0.0
+        
+        for i, det in enumerate(detections):
+            if det_used[i]:
+                continue
+            if det.class_id != track.class_id:
+                continue
+            
+            iou = self._compute_iou(track.truth_box, np.array(det.box))
+            freq_dist = abs(
+                self._center_freq(track.truth_box) - 
+                self._center_freq(np.array(det.box))
+            )
+            
+            # Match if IoU is good OR frequency is close
+            if iou >= self.iou_thresh or freq_dist <= self.freq_tol:
+                score = iou + max(0, self.freq_tol - freq_dist)
+                if score > best_score:
+                    best_score = score
+                    best_idx = i
+        
+        return best_idx
+    
+    def _update_matched_track(self, track: TrackState, det: Detection):
+        """Update track with matched detection."""
+        new_box = np.array(det.box)
+        
+        # Drift detection (optional)
+        if self.enable_drift:
+            displacement = new_box - track.truth_box
+            self._update_drift_state(track, displacement)
+        
+        # Update truth box
+        if track.motion_mode == 'drifting' and self.enable_drift:
+            # Predict then correct
+            predicted = track.truth_box + track.velocity
+            track.truth_box = self.box_alpha * new_box + (1 - self.box_alpha) * predicted
+        else:
+            # Pure EMA
+            track.truth_box = self.box_alpha * new_box + (1 - self.box_alpha) * track.truth_box
+        
+        # Update display box (extra smoothing)
+        track.display_box = (
+            self.display_alpha * track.truth_box + 
+            (1 - self.display_alpha) * track.display_box
+        )
+        
+        # Update confidence (asymmetric: fast rise, slow fall)
+        if det.confidence > track.confidence:
+            alpha = self.conf_rise
+        else:
+            alpha = self.conf_fall
+        track.confidence = alpha * det.confidence + (1 - alpha) * track.confidence
+        
+        # Update lifecycle
+        track.age = 0
+        track.hits += 1
+        if track.hits >= self.confirm_hits and track.state == 'tentative':
+            track.state = 'confirmed'
+    
+    def _update_drift_state(self, track: TrackState, displacement: np.ndarray):
+        """Detect and track signal drift."""
+        disp_magnitude = np.linalg.norm(displacement[:2])  # x, y only
+        
+        if disp_magnitude > self.drift_min_disp:
+            # Check direction consistency
+            if track.drift_evidence > 0:
+                direction_consistent = np.dot(displacement, track.velocity) > 0
+            else:
+                direction_consistent = True
+            
+            if direction_consistent:
+                track.drift_evidence += 1
+                # Update velocity estimate with EMA
+                track.velocity = 0.3 * displacement + 0.7 * track.velocity
+            else:
+                track.drift_evidence = max(0, track.drift_evidence - 2)
+        else:
+            track.drift_evidence = max(0, track.drift_evidence - 1)
+            track.velocity *= 0.8  # Decay velocity
+        
+        # Switch modes
+        if track.drift_evidence >= self.drift_frames:
+            track.motion_mode = 'drifting'
+        elif track.drift_evidence == 0:
+            track.motion_mode = 'stationary'
+            track.velocity = np.zeros(4)
+    
+    def _age_unmatched_track(self, track: TrackState):
+        """Age a track that wasn't matched this frame."""
+        track.age += 1
+        track.confidence *= 0.95  # Slow decay
+        track.drift_evidence = max(0, track.drift_evidence - 1)
+        
+        if track.age > self.max_age:
+            track.state = 'lost'
+    
+    def _create_track(self, det: Detection, frame_id: int):
+        """Create new track from unmatched detection."""
+        box = np.array(det.box)
+        track = TrackState(
+            track_id=self.next_id,
+            class_id=det.class_id,
+            class_name=det.class_name,
+            truth_box=box.copy(),
+            display_box=box.copy(),
+            confidence=det.confidence,
+        )
+        self.tracks[self.next_id] = track
+        self.next_id += 1
+    
+    def _export_tracks(self, frame_id: int) -> list[Track]:
+        """Convert internal state to output format."""
+        result = []
+        for t in self.tracks.values():
+            if t.state == 'lost':
+                continue
+            
+            # Convert box to Hz
+            freq_center = self._box_to_freq_center(t.display_box)
+            freq_bw = self._box_to_freq_bandwidth(t.display_box)
+            
+            result.append(Track(
+                track_id=t.track_id,
+                class_id=t.class_id,
+                class_name=t.class_name,
+                truth_box=tuple(t.truth_box),
+                display_box=tuple(t.display_box),
+                confidence=t.confidence,
+                state=t.state,
+                age_frames=t.age,
+                hits=t.hits,
+                motion_mode=t.motion_mode,
+                drift_rate_hz_per_sec=self._velocity_to_hz_per_sec(t.velocity),
+                drift_confidence=min(1.0, t.drift_evidence / self.drift_frames),
+                freq_center_hz=freq_center,
+                freq_bandwidth_hz=freq_bw,
+                first_seen_frame_id=0,  # TODO: track this
+                last_seen_frame_id=frame_id,
+            ))
+        
+        return result
+    
+    @staticmethod
+    def _compute_iou(box1: np.ndarray, box2: np.ndarray) -> float:
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union = area1 + area2 - inter
+        
+        return inter / union if union > 0 else 0.0
+    
+    @staticmethod
+    def _center_freq(box: np.ndarray) -> float:
+        return (box[0] + box[2]) / 2
+Acceptance criteria:
+
+ No flicker: tracks are stable frame-to-frame
+ No jitter: display boxes are smooth
+ Confidence doesn't flash: accumulation works
+ Lifecycle states progress correctly: tentative → confirmed → lost
+ Drift detection activates only with consistent evidence (if enabled)
+
+
+Phase 3: Frame-ID Synchronization (Week 3)
+Goal: Replace time-based scrolling with frame-indexed mapping.
+Task 3.1: Frame Buffer Manager
+python# frame_buffer.py
+from collections import OrderedDict
+from threading import Lock
+
+class FrameBuffer:
+    """
+    Manages spectrogram frames for synchronized display.
+    Frames are indexed by frame_id, not time.
+    """
+    
+    def __init__(self, max_frames: int = 300):
+        self.max_frames = max_frames
+        self.frames: OrderedDict[int, SpectrogramFrame] = OrderedDict()
+        self.lock = Lock()
+    
+    def add_frame(self, frame: SpectrogramFrame):
+        with self.lock:
+            self.frames[frame.frame_id] = frame
+            
+            # Prune old frames
+            while len(self.frames) > self.max_frames:
+                self.frames.popitem(last=False)
+    
+    def get_frame(self, frame_id: int) -> Optional[SpectrogramFrame]:
+        with self.lock:
+            return self.frames.get(frame_id)
+    
+    def get_display_range(self, rows: int = 256) -> list[SpectrogramFrame]:
+        """Get the most recent N frames for display."""
+        with self.lock:
+            frame_ids = list(self.frames.keys())[-rows:]
+            return [self.frames[fid] for fid in frame_ids]
+    
+    def frame_id_to_row(self, frame_id: int, display_rows: int = 256) -> Optional[int]:
+        """
+        Convert frame_id to display row position.
+        Returns None if frame is outside display range.
+        """
+        with self.lock:
+            if frame_id not in self.frames:
+                return None
+            
+            frame_ids = list(self.frames.keys())
+            if frame_id not in frame_ids[-display_rows:]:
+                return None
+            
+            # Row 0 = newest (top), row N = oldest (bottom)
+            newest_id = frame_ids[-1]
+            row = newest_id - frame_id
+            
+            if 0 <= row < display_rows:
+                return row
+            return None
+Task 3.2: Update Flutter Display
+dart// waterfall_display.dart
+class WaterfallDisplayState extends State<WaterfallDisplay> {
+  final FrameBuffer _frameBuffer = FrameBuffer();
+  
+  /// Convert track box to pixel coordinates using frame_id mapping
+  Rect trackBoxToPixels(Track track, Size displaySize, int displayRows) {
+    // X: frequency axis (direct mapping)
+    final x1 = track.displayBox[0] * displaySize.width;
+    final x2 = track.displayBox[2] * displaySize.width;
+    
+    // Y: time axis (frame_id based)
+    final row = _frameBuffer.frameIdToRow(
+      track.lastSeenFrameId, 
+      displayRows
+    );
+    
+    if (row == null) {
+      // Track is outside visible range
+      return Rect.zero;
+    }
+    
+    final rowHeight = displaySize.height / displayRows;
+    final y1 = row * rowHeight;
+    final y2 = y1 + (track.displayBox[3] - track.displayBox[1]) * displaySize.height;
+    
+    return Rect.fromLTRB(x1, y1, x2, y2);
+  }
+}
+Acceptance criteria:
+
+ Track boxes scroll with waterfall at exact same rate
+ No drift between box and signal over time
+ Boxes disappear cleanly when scrolling off screen
+ System can replay from logged frames deterministically
+
+
+Phase 4: Overlay Rendering (Week 3-4)
+Goal: Single-pass rendering with minimal occlusion.
+Task 4.1: Track Overlay Painter
+dart// track_overlay.dart
+import 'dart:math';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+
+class TrackOverlayPainter extends CustomPainter {
+  final List<Track> tracks;
+  final int? selectedTrackId;
+  final FrameBuffer frameBuffer;
+  final int displayRows;
+  
+  // Pre-allocated paint objects (avoid per-frame allocation)
+  final Paint _strokePaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round;
+  
+  final Paint _fillPaint = Paint()
+    ..style = PaintingStyle.fill;
+  
+  // Class colors
+  static const Map<int, Color> classColors = {
+    0: Color(0xFF4CAF50),  // Green
+    1: Color(0xFF2196F3),  // Blue
+    2: Color(0xFFFF9800),  // Orange
+    3: Color(0xFF9C27B0),  // Purple
+    4: Color(0xFF00BCD4),  // Cyan
+  };
+  
+  TrackOverlayPainter({
+    required this.tracks,
+    required this.frameBuffer,
+    this.selectedTrackId,
+    this.displayRows = 256,
+  });
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final track in tracks) {
+      final rect = _trackToRect(track, size);
+      if (rect == Rect.zero) continue;
+      
+      _paintTrack(canvas, track, rect);
+    }
+  }
+  
+  Rect _trackToRect(Track track, Size size) {
+    // X axis: direct normalized mapping
+    final x1 = track.displayBox[0] * size.width;
+    final x2 = track.displayBox[2] * size.width;
+    
+    // Y axis: frame_id to row mapping
+    final row = frameBuffer.frameIdToRow(track.lastSeenFrameId, displayRows);
+    if (row == null) return Rect.zero;
+    
+    final rowHeight = size.height / displayRows;
+    
+    // Box height from normalized coords
+    final boxHeightNorm = track.displayBox[3] - track.displayBox[1];
+    final boxHeightRows = (boxHeightNorm * displayRows).clamp(1.0, displayRows.toDouble());
+    
+    final y1 = row * rowHeight;
+    final y2 = y1 + boxHeightRows * rowHeight;
+    
+    return Rect.fromLTRB(x1, y1.toDouble(), x2, y2.clamp(0, size.height));
+  }
+  
+  void _paintTrack(Canvas canvas, Track track, Rect rect) {
+    final isSelected = track.trackId == selectedTrackId;
+    
+    // Base color from class
+    final baseColor = classColors[track.classId % classColors.length] 
+        ?? const Color(0xFFFFEB3B);
+    
+    // Opacity from confidence and age
+    final ageDecay = pow(0.92, track.ageFrames).toDouble();
+    final opacity = (track.confidence * ageDecay).clamp(0.4, 1.0);
+    
+    // Stroke width from state
+    double strokeWidth;
+    switch (track.state) {
+      case 'tentative':
+        strokeWidth = 1.5;
+        break;
+      case 'confirmed':
+        strokeWidth = isSelected ? 3.0 : 2.0;
+        break;
+      default:
+        strokeWidth = 1.0;
+    }
+    
+    _strokePaint
+      ..color = baseColor.withOpacity(opacity)
+      ..strokeWidth = strokeWidth;
+    
+    if (isSelected) {
+      // Selected: full rectangle + subtle fill
+      canvas.drawRect(rect, _strokePaint);
+      _fillPaint.color = baseColor.withOpacity(0.1);
+      canvas.drawRect(rect, _fillPaint);
+    } else {
+      // Default: corner markers only
+      _drawCornerMarkers(canvas, rect, _strokePaint);
+    }
+    
+    // Drift indicator (optional)
+    if (track.motionMode == 'drifting') {
+      _drawDriftIndicator(canvas, rect, track, baseColor.withOpacity(opacity));
+    }
+  }
+  
+  void _drawCornerMarkers(Canvas canvas, Rect rect, Paint paint) {
+    final cornerLen = min(rect.width, rect.height) * 0.25;
+    final len = max(cornerLen, 6.0);
+    
+    final path = Path()
+      // Top-left
+      ..moveTo(rect.left, rect.top + len)
+      ..lineTo(rect.left, rect.top)
+      ..lineTo(rect.left + len, rect.top)
+      // Top-right
+      ..moveTo(rect.right - len, rect.top)
+      ..lineTo(rect.right, rect.top)
+      ..lineTo(rect.right, rect.top + len)
+      // Bottom-right
+      ..moveTo(rect.right, rect.bottom - len)
+      ..lineTo(rect.right, rect.bottom)
+      ..lineTo(rect.right - len, rect.bottom)
+      // Bottom-left
+      ..moveTo(rect.left + len, rect.bottom)
+      ..lineTo(rect.left, rect.bottom)
+      ..lineTo(rect.left, rect.bottom - len);
+    
+    canvas.drawPath(path, paint);
+  }
+  
+  void _drawDriftIndicator(Canvas canvas, Rect rect, Track track, Color color) {
+    // Small arrow showing drift direction
+    final arrowPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    
+    final centerX = rect.center.dx;
+    final top = rect.top - 8;
+    
+    // Arrow pointing in drift direction
+    final direction = track.driftRateHzPerSec > 0 ? 1.0 : -1.0;
+    
+    canvas.drawLine(
+      Offset(centerX - 4 * direction, top + 4),
+      Offset(centerX + 4 * direction, top),
+      arrowPaint,
+    );
+    canvas.drawLine(
+      Offset(centerX - 4 * direction, top - 4),
+      Offset(centerX + 4 * direction, top),
+      arrowPaint,
+    );
+  }
+  
+  @override
+  bool shouldRepaint(TrackOverlayPainter oldDelegate) {
+    // Repaint if tracks changed or selection changed
+    return tracks != oldDelegate.tracks ||
+           selectedTrackId != oldDelegate.selectedTrackId;
+  }
+}
+Acceptance criteria:
+
+ All tracks render in single paint call
+ Corner markers only (no fill) by default
+ Selected track shows full rectangle with subtle fill
+ Opacity reflects confidence and age
+ No frame drops at 50+ tracks
+ Signal texture remains visible through overlays
+
+
+Phase 5: TensorRT Deployment (Week 4)
+Goal: Optimized inference with bounded latency.
+Task 5.1: Model Export
+bash# On development machine
+# Export YOLOv8s to ONNX
+pip install ultralytics
+yolo export model=yolov8s.pt format=onnx imgsz=640 opset=17 simplify=True
+Task 5.2: Engine Build (ON TARGET DEVICE)
+bash# SSH to Orin NX
+# Build TensorRT engine - MUST be done on target device
+
+# FP16 (recommended first)
+/usr/src/tensorrt/bin/trtexec \
+    --onnx=yolov8s.onnx \
+    --saveEngine=yolov8s_fp16.engine \
+    --fp16 \
+    --workspace=4096 \
+    --verbose
+
+# INT8 (requires calibration)
+/usr/src/tensorrt/bin/trtexec \
+    --onnx=yolov8s.onnx \
+    --saveEngine=yolov8s_int8.engine \
+    --int8 \
+    --calib=calibration_cache.bin \
+    --workspace=4096 \
+    --verbose
+Task 5.3: Calibration Data Collection
+python# calibration.py
+"""
+Collect calibration images for INT8 quantization.
+Run this on representative RF data from target environment.
+"""
+import numpy as np
+from pathlib import Path
+
+class CalibrationDataCollector:
+    def __init__(self, output_dir: str, target_count: int = 500):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(exist_ok=True)
+        self.target_count = target_count
+        self.collected = 0
+    
+    def add_frame(self, frame: SpectrogramFrame):
+        """Add a spectrogram frame to calibration set."""
+        if self.collected >= self.target_count:
+            return
+        
+        # Derive inference input (same as production)
+        tensor = self._prepare_inference_input(frame)
+        
+        # Save as numpy
+        np.save(
+            self.output_dir / f"calib_{self.collected:04d}.npy",
+            tensor
+        )
+        self.collected += 1
+        
+        if self.collected % 50 == 0:
+            print(f"Calibration: {self.collected}/{self.target_count}")
+Task 5.4: Inference Wrapper
+python# tensorrt_inference.py
+import tensorrt as trt
+import numpy as np
+from cuda import cudart
+
+class TensorRTInference:
+    def __init__(self, engine_path: str):
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        
+        # Load engine
+        with open(engine_path, 'rb') as f:
+            self.engine = trt.Runtime(self.logger).deserialize_cuda_engine(f.read())
+        
+        self.context = self.engine.create_execution_context()
+        
+        # Allocate buffers
+        self._allocate_buffers()
+    
+    def _allocate_buffers(self):
+        """Pre-allocate input/output buffers."""
+        self.inputs = []
+        self.outputs = []
+        self.bindings = []
+        
+        for i in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(i)
+            dtype = trt.nptype(self.engine.get_tensor_dtype(name))
+            shape = self.engine.get_tensor_shape(name)
+            size = trt.volume(shape)
+            
+            # Allocate device memory
+            err, device_mem = cudart.cudaMalloc(size * np.dtype(dtype).itemsize)
+            
+            self.bindings.append(int(device_mem))
+            
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self.inputs.append({
+                    'name': name, 'shape': shape, 'dtype': dtype,
+                    'device': device_mem, 'size': size
+                })
+            else:
+                self.outputs.append({
+                    'name': name, 'shape': shape, 'dtype': dtype,
+                    'device': device_mem, 'size': size
+                })
+    
+    def infer(self, input_tensor: np.ndarray) -> list[Detection]:
+        """
+        Run inference on prepared input tensor.
+        Returns list of Detection objects.
+        """
+        # Copy input to device
+        cudart.cudaMemcpy(
+            self.inputs[0]['device'],
+            input_tensor.ctypes.data,
+            input_tensor.nbytes,
+            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice
+        )
+        
+        # Set tensor addresses
+        for inp in self.inputs:
+            self.context.set_tensor_address(inp['name'], inp['device'])
+        for out in self.outputs:
+            self.context.set_tensor_address(out['name'], out['device'])
+        
+        # Execute
+        self.context.execute_async_v3(0)
+        cudart.cudaStreamSynchronize(0)
+        
+        # Copy outputs to host and parse
+        return self._parse_outputs()
+    
+    def _parse_outputs(self) -> list[Detection]:
+        """Parse YOLOv8 outputs into Detection objects."""
+        # Implementation depends on model output format
+        # YOLOv8 outputs: [batch, 84, 8400] for 80-class COCO
+        # Custom model may differ
+        pass
+Acceptance criteria:
+
+ Engine builds successfully on Orin NX
+ FP16 inference latency ≤20ms
+ INT8 inference latency ≤15ms (if calibrated)
+ No accuracy regression vs PyTorch baseline (mAP within 1%)
+ Engine loads in <5 seconds
+
+
+Phase 6: Async Database Logging (Week 4)
+Goal: Never block real-time pipeline.
+python# database.py
+import asyncio
+import asyncpg
+from dataclasses import asdict
+from typing import Optional
+
+class DetectionLogger:
+    """
+    Async batch logger for detections.
+    Never blocks the real-time pipeline.
+    """
+    
+    def __init__(
+        self,
+        connection_string: str,
+        batch_size: int = 50,
+        flush_interval_ms: int = 500,
+    ):
+        self.conn_string = connection_string
+        self.batch_size = batch_size
+        self.flush_interval = flush_interval_ms / 1000.0
+        
+        self.queue: asyncio.Queue[Track] = asyncio.Queue(maxsize=1000)
+        self.pool: Optional[asyncpg.Pool] = None
+        self._running = False
+    
+    async def start(self):
+        """Initialize connection pool and start flush task."""
+        self.pool = await asyncpg.create_pool(
+            self.conn_string,
+            min_size=2,
+            max_size=5,
+        )
+        await self._create_tables()
+        
+        self._running = True
+        asyncio.create_task(self._flush_loop())
+    
+    async def _create_tables(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS tracks (
+                    id SERIAL PRIMARY KEY,
+                    track_id INTEGER NOT NULL,
+                    frame_id BIGINT NOT NULL,
+                    timestamp_ns BIGINT NOT NULL,
+                    class_id INTEGER NOT NULL,
+                    class_name VARCHAR(64),
+                    confidence REAL,
+                    state VARCHAR(16),
+                    box_x1 REAL, box_y1 REAL, box_x2 REAL, box_y2 REAL,
+                    freq_center_hz DOUBLE PRECISION,
+                    freq_bandwidth_hz DOUBLE PRECISION,
+                    motion_mode VARCHAR(16),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_tracks_frame 
+                ON tracks(frame_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_tracks_time 
+                ON tracks(timestamp_ns);
+            ''')
+    
+    def log(self, track: Track, frame_id: int, timestamp_ns: int):
+        """
+        Non-blocking log. Drops if queue is full.
+        """
+        try:
+            self.queue.put_nowait((track, frame_id, timestamp_ns))
+        except asyncio.QueueFull:
+            # Drop oldest to make room (back-pressure)
+            try:
+                self.queue.get_nowait()
+                self.queue.put_nowait((track, frame_id, timestamp_ns))
+            except:
+                pass  # Best effort
+    
+    async def _flush_loop(self):
+        """Background task to batch insert."""
+        while self._running:
+            await asyncio.sleep(self.flush_interval)
+            await self._flush_batch()
+    
+    async def _flush_batch(self):
+        """Flush queued tracks to database."""
+        batch = []
+        while len(batch) < self.batch_size:
+            try:
+                item = self.queue.get_nowait()
+                batch.append(item)
+            except asyncio.QueueEmpty:
+                break
+        
+        if not batch:
+            return
+        
+        async with self.pool.acquire() as conn:
+            await conn.executemany('''
+                INSERT INTO tracks 
+                (track_id, frame_id, timestamp_ns, class_id, class_name,
+                 confidence, state, box_x1, box_y1, box_x2, box_y2,
+                 freq_center_hz, freq_bandwidth_hz, motion_mode)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ''', [
+                (t.track_id, fid, ts, t.class_id, t.class_name,
+                 t.confidence, t.state, 
+                 t.display_box[0], t.display_box[1], t.display_box[2], t.display_box[3],
+                 t.freq_center_hz, t.freq_bandwidth_hz, t.motion_mode)
+                for t, fid, ts in batch
+            ])
+    
+    async def stop(self):
+        """Flush remaining and close."""
+        self._running = False
+        await self._flush_batch()  # Final flush
+        await self.pool.close()
+```
+
+**Acceptance criteria**:
+- [ ] Logging never blocks inference or display
+- [ ] Queue overflow drops gracefully (no crash)
+- [ ] Batch inserts complete in <10ms for 50 records
+- [ ] All logged tracks have frame_id for replay correlation
+
+---
+
+## Part 6: Risk Register
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| **Flutter GPU→CPU copy becomes bottleneck** | Display frame drops | Medium | Profile early; v2 external textures if needed |
+| **TensorRT engine not portable** | Deployment failure | High | Always build engine ON target device; document exact JetPack version |
+| **INT8 calibration data not representative** | Accuracy regression | Medium | Collect calibration data from actual deployment environment; validate mAP before shipping |
+| **Tracker parameters need tuning per deployment** | Poor UX | Medium | Expose key params (iou_thresh, freq_tol, confirm_hits) as config; provide tuning guide |
+| **Database becomes bottleneck under load** | Logging gaps | Low | Async queue with drop policy; monitor queue depth |
+| **Memory leak in long-running sessions** | Crash after hours | Medium | Profile with valgrind/heaptrack; implement explicit buffer cycling |
+
+---
+
+## Part 7: Acceptance Criteria Summary
+
+### Functional
+
+- [ ] Boxes never drift from visible signals (canonical space mapping works)
+- [ ] Tracks are stable (no flicker between frames)
+- [ ] Confidence displays smoothly (accumulation works)
+- [ ] Overlay never obscures signal texture (corner markers, 0% fill)
+- [ ] Deterministic replay possible from logged frames + track metadata
+- [ ] Selected track shows full rectangle with subtle fill
+
+### Performance
+
+- [ ] End-to-end latency ≤100ms
+- [ ] Display sustains 30fps without drops
+- [ ] Inference completes within 20ms (FP16) or 15ms (INT8)
+- [ ] 50+ simultaneous tracks render without frame drops
+- [ ] Database logging never blocks pipeline
+
+### Operational
+
+- [ ] System runs 24+ hours without degradation
+- [ ] Config changes don't require code changes
+- [ ] Logs include frame_id for debugging
+- [ ] Latency metrics are observable
+
+---
+
+## Part 8: File Structure
+```
+g20_waterfall/
+├── config/
+│   ├── spectrogram.yaml       # FFT config (single source of truth)
+│   ├── tracker.yaml           # Tracker parameters
+│   ├── inference.yaml         # Model paths, thresholds
+│   └── database.yaml          # Connection string, batch params
+│
+├── backend/
+│   ├── spectrogram/
+│   │   ├── generator.py       # CanonicalSpectrogramGenerator
+│   │   ├── frame.py           # SpectrogramFrame dataclass
+│   │   └── config.py          # SpectrogramConfig
+│   │
+│   ├── inference/
+│   │   ├── tensorrt_engine.py # TensorRTInference
+│   │   ├── preprocessing.py   # Spatial transform from canonical
+│   │   ├── postprocessing.py  # Detection parsing
+│   │   └── calibration.py     # INT8 calibration tools
+│   │
+│   ├── tracker/
+│   │   ├── tracker.py         # RFSignalTracker
+│   │   ├── track.py           # Track, TrackState dataclasses
+│   │   └── association.py     # IoU + frequency matching
+│   │
+│   ├── transport/
+│   │   ├── frame_buffer.py    # FrameBuffer (frame_id indexed)
+│   │   ├── websocket.py       # Binary WebSocket server
+│   │   └── protocol.py        # Message serialization
+│   │
+│   ├── database/
+│   │   ├── logger.py          # DetectionLogger (async batch)
+│   │   └── schema.sql         # Table definitions
+│   │
+│   └── pipeline.py            # Main orchestration
+│
+├── flutter_app/
+│   ├── lib/
+│   │   ├── providers/
+│   │   │   ├── waterfall_provider.dart
+│   │   │   ├── track_provider.dart
+│   │   │   └── websocket_provider.dart
+│   │   │
+│   │   ├── widgets/
+│   │   │   ├── waterfall_display.dart
+│   │   │   ├── track_overlay.dart     # TrackOverlayPainter
+│   │   │   └── signal_info_panel.dart
+│   │   │
+│   │   ├── models/
+│   │   │   ├── track.dart
+│   │   │   └── spectrogram_frame.dart
+│   │   │
+│   │   └── main.dart
+│   │
+│   └── pubspec.yaml
+│
+├── scripts/
+│   ├── build_tensorrt_engine.sh   # Run ON target device
+│   ├── collect_calibration.py
+│   └── validate_model.py
+│
+├── tests/
+│   ├── test_tracker.py
+│   ├── test_frame_sync.py
+│   └── test_overlay_render.dart
+│
+└── README.md
+
+Part 9: Getting Started (For Agent)
+Step 1: Set Up Development Environment
+bash# Clone repo structure
+mkdir -p g20_waterfall/{config,backend/{spectrogram,inference,tracker,transport,database},flutter_app,scripts,tests}
+
+# Backend dependencies
+cd g20_waterfall
+python -m venv venv
+source venv/bin/activate
+pip install numpy cupy-cuda12x asyncpg websockets pyyaml
+Step 2: Implement in Order
+
+config/spectrogram.yaml + backend/spectrogram/ — Get canonical spectrogram working first
+backend/tracker/ — Implement tracker with tests
+backend/transport/frame_buffer.py — Frame-ID indexing
+flutter_app/lib/widgets/track_overlay.dart — Single-pass rendering
+backend/inference/ — TensorRT integration
+backend/database/ — Async logging
+
+Step 3: Validate Each Phase
+After each phase, verify acceptance criteria before moving on. Don't optimize prematurely.

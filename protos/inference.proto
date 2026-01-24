@@ -1,0 +1,288 @@
+// inference.proto - Inference and Detection Service
+// G20 Demo Backend - Standalone
+
+syntax = "proto3";
+
+package g20;
+
+option go_package = "github.com/g20_demo/proto";
+
+// Inference Service - manages ML inference pipeline
+service InferenceService {
+  // Model management
+  rpc LoadModel(LoadModelRequest) returns (LoadModelResponse);
+  rpc UnloadModel(UnloadModelRequest) returns (UnloadModelResponse);
+  rpc GetModels(GetModelsRequest) returns (GetModelsResponse);
+  rpc GetActiveModel(GetActiveModelRequest) returns (GetActiveModelResponse);
+  
+  // Inference control
+  rpc StartInference(StartInferenceRequest) returns (StartInferenceResponse);
+  rpc StopInference(StopInferenceRequest) returns (StopInferenceResponse);
+  
+  // Streaming detections - main data flow
+  rpc StreamDetections(StreamDetectionsRequest) returns (stream DetectionFrame);
+  
+  // Training
+  rpc StartTraining(StartTrainingRequest) returns (StartTrainingResponse);
+  rpc StopTraining(StopTrainingRequest) returns (StopTrainingResponse);
+  rpc GetTrainingStatus(GetTrainingStatusRequest) returns (TrainingStatus);
+  rpc StreamTrainingProgress(StreamTrainingRequest) returns (stream TrainingProgress);
+}
+
+// ============= Model Management =============
+
+message LoadModelRequest {
+  string model_path = 1;
+  string model_name = 2;
+  ModelBackend backend = 3;
+  bool hot_swap = 4;
+}
+
+message LoadModelResponse {
+  bool success = 1;
+  string error_message = 2;
+  string model_id = 3;
+  ModelInfo model_info = 4;
+}
+
+message UnloadModelRequest {
+  string model_id = 1;
+}
+
+message UnloadModelResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message GetModelsRequest {}
+
+message GetModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+message GetActiveModelRequest {}
+
+message GetActiveModelResponse {
+  bool has_active_model = 1;
+  ModelInfo active_model = 2;
+}
+
+message ModelInfo {
+  string model_id = 1;
+  string model_name = 2;
+  string model_path = 3;
+  string model_hash = 4;
+  ModelBackend backend = 5;
+  int32 num_classes = 6;
+  repeated string class_names = 7;
+  optional double f1_score = 8;
+  optional double precision = 9;
+  optional double recall = 10;
+  optional double avg_inference_ms = 11;
+  int64 created_at_ms = 12;
+  int64 loaded_at_ms = 13;
+}
+
+enum ModelBackend {
+  BACKEND_PYTORCH = 0;
+  BACKEND_TENSORRT = 1;
+  BACKEND_ONNX = 2;
+}
+
+// ============= Inference Control =============
+
+message StartInferenceRequest {
+  string model_id = 1;
+  InferenceSource source = 2;
+  InferenceConfig config = 3;
+}
+
+message InferenceSource {
+  oneof source {
+    LiveSource live = 1;
+    FileSource file = 2;
+  }
+}
+
+message LiveSource {
+  int32 rx_channel = 1;
+}
+
+message FileSource {
+  string file_path = 1;
+  bool loop = 2;
+  double speed_multiplier = 3;
+}
+
+message InferenceConfig {
+  double score_threshold = 1;
+  int32 batch_size = 2;
+  string precision = 3;
+  int32 chunk_ms = 4;
+  int32 nfft = 5;
+  int32 noverlap = 6;
+}
+
+message StartInferenceResponse {
+  bool success = 1;
+  string error_message = 2;
+  string session_id = 3;
+}
+
+message StopInferenceRequest {
+  string session_id = 1;
+}
+
+message StopInferenceResponse {
+  bool success = 1;
+  string error_message = 2;
+  InferenceStats stats = 3;
+}
+
+message InferenceStats {
+  int64 total_chunks = 1;
+  int64 total_detections = 2;
+  double avg_inference_ms = 3;
+  double avg_preprocessing_ms = 4;
+  double throughput_chunks_per_sec = 5;
+  int64 duration_ms = 6;
+}
+
+// ============= Detection Streaming =============
+
+message StreamDetectionsRequest {
+  string session_id = 1;
+  bool include_spectrogram = 2;
+  bool include_fft = 3;
+}
+
+// Main detection frame - streamed at ~30 FPS
+message DetectionFrame {
+  int64 frame_id = 1;
+  int64 timestamp_ms = 2;
+  double elapsed_seconds = 3;
+  repeated Detection detections = 4;
+  optional SpectrogramData spectrogram = 5;
+  optional FFTData fft = 6;
+  double center_freq_mhz = 7;
+  double bandwidth_mhz = 8;
+}
+
+message Detection {
+  int32 detection_id = 1;
+  string class_name = 2;
+  int32 class_id = 3;
+  double confidence = 4;
+  double x1 = 5;
+  double y1 = 6;
+  double x2 = 7;
+  double y2 = 8;
+  double freq_center_mhz = 9;
+  double freq_bandwidth_mhz = 10;
+  double time_start_ms = 11;
+  double time_duration_ms = 12;
+  optional double latitude = 13;
+  optional double longitude = 14;
+  optional double bearing_deg = 15;
+}
+
+message SpectrogramData {
+  int32 width = 1;
+  int32 height = 2;
+  bytes data = 3;
+  DataFormat format = 4;
+  double min_db = 5;
+  double max_db = 6;
+}
+
+message FFTData {
+  int32 num_bins = 1;
+  bytes magnitudes = 2;
+  double freq_start_mhz = 3;
+  double freq_end_mhz = 4;
+}
+
+enum DataFormat {
+  FORMAT_FLOAT32 = 0;
+  FORMAT_UINT8 = 1;
+  FORMAT_UINT8_COMPRESSED = 2;
+}
+
+// ============= Training =============
+
+message StartTrainingRequest {
+  string data_dir = 1;
+  TrainingConfig config = 2;
+  string output_model_name = 3;
+}
+
+message TrainingConfig {
+  int32 epochs = 1;
+  int32 batch_size = 2;
+  double learning_rate = 3;
+  int32 k_folds = 4;
+  int32 early_stop_patience = 5;
+  string backbone = 6;
+  bool pretrained = 7;
+  int32 trainable_layers = 8;
+}
+
+message StartTrainingResponse {
+  bool success = 1;
+  string error_message = 2;
+  string training_id = 3;
+}
+
+message StopTrainingRequest {
+  string training_id = 1;
+}
+
+message StopTrainingResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message GetTrainingStatusRequest {
+  string training_id = 1;
+}
+
+message StreamTrainingRequest {
+  string training_id = 1;
+}
+
+message TrainingStatus {
+  string training_id = 1;
+  TrainingState state = 2;
+  int32 current_epoch = 3;
+  int32 total_epochs = 4;
+  double progress_percent = 5;
+  double train_loss = 6;
+  double val_loss = 7;
+  double precision = 8;
+  double recall = 9;
+  double f1_score = 10;
+  int64 started_at_ms = 11;
+  int64 elapsed_ms = 12;
+  int64 eta_ms = 13;
+  string output_model_path = 14;
+}
+
+message TrainingProgress {
+  string training_id = 1;
+  int32 epoch = 2;
+  int32 step = 3;
+  int32 total_steps = 4;
+  double loss = 5;
+  double learning_rate = 6;
+  string message = 7;
+}
+
+enum TrainingState {
+  TRAINING_IDLE = 0;
+  TRAINING_PREPARING = 1;
+  TRAINING_RUNNING = 2;
+  TRAINING_VALIDATING = 3;
+  TRAINING_COMPLETE = 4;
+  TRAINING_FAILED = 5;
+  TRAINING_CANCELLED = 6;
+}
