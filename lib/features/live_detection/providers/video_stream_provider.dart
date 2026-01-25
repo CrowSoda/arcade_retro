@@ -131,9 +131,6 @@ class VideoStreamState {
   final int bufferWidth;         // Width of pixel buffer (2048)
   final int bufferHeight;        // Height of pixel buffer (suggested by backend)
   
-  // LEGACY: For JPEG/video mode compatibility
-  final Uint8List? currentFrame;
-  
   final List<VideoDetection> detections;
   final double currentPts;
   final int frameCount;
@@ -143,6 +140,9 @@ class VideoStreamState {
   // ROW SYNC: Row-based tracking
   final int totalRowsReceived;  // Monotonic counter
   final int rowsPerStrip;       // Rows per strip (~38)
+  
+  // PSD data for the line graph at bottom of screen
+  final Float32List? psd;       // Raw dB values for PSD chart
 
   const VideoStreamState({
     this.isConnected = false,
@@ -150,8 +150,7 @@ class VideoStreamState {
     this.metadata,
     this.pixelBuffer,
     this.bufferWidth = 2048,
-    this.bufferHeight = 5700,
-    this.currentFrame,
+    this.bufferHeight = 2850,  // ~2.5s at 30fps, reduced for performance
     this.detections = const [],
     this.currentPts = 0.0,
     this.frameCount = 0,
@@ -159,6 +158,7 @@ class VideoStreamState {
     this.fps = 0.0,
     this.totalRowsReceived = 0,
     this.rowsPerStrip = 38,
+    this.psd,
   });
 
   VideoStreamState copyWith({
@@ -168,7 +168,6 @@ class VideoStreamState {
     Uint8List? pixelBuffer,
     int? bufferWidth,
     int? bufferHeight,
-    Uint8List? currentFrame,
     List<VideoDetection>? detections,
     double? currentPts,
     int? frameCount,
@@ -176,6 +175,7 @@ class VideoStreamState {
     double? fps,
     int? totalRowsReceived,
     int? rowsPerStrip,
+    Float32List? psd,
   }) {
     return VideoStreamState(
       isConnected: isConnected ?? this.isConnected,
@@ -184,7 +184,6 @@ class VideoStreamState {
       pixelBuffer: pixelBuffer ?? this.pixelBuffer,
       bufferWidth: bufferWidth ?? this.bufferWidth,
       bufferHeight: bufferHeight ?? this.bufferHeight,
-      currentFrame: currentFrame ?? this.currentFrame,
       detections: detections ?? this.detections,
       currentPts: currentPts ?? this.currentPts,
       frameCount: frameCount ?? this.frameCount,
@@ -192,6 +191,7 @@ class VideoStreamState {
       fps: fps ?? this.fps,
       totalRowsReceived: totalRowsReceived ?? this.totalRowsReceived,
       rowsPerStrip: rowsPerStrip ?? this.rowsPerStrip,
+      psd: psd ?? this.psd,
     );
   }
   
@@ -210,7 +210,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   // Local pixel buffer for stitching strips
   Uint8List? _pixelBuffer;
   int _bufferWidth = 2048;
-  int _bufferHeight = 5700;  // Default: 5s × 30fps × 38 rows
+  int _bufferHeight = 2850;  // Default: 2.5s × 30fps × 38 rows
   static const int _bytesPerPixel = 4;  // RGBA
   
   // FPS calculation
@@ -346,12 +346,26 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     final pts = header.getFloat32(12, Endian.little);
     
     // Extract RGBA pixel data
-    final expectedBytes = rowsInStrip * stripWidth * _bytesPerPixel;
-    final pixelData = data.sublist(16);
+    final expectedRgbaBytes = rowsInStrip * stripWidth * _bytesPerPixel;
     
-    if (pixelData.length < expectedBytes) {
-      debugPrint('[VideoStream] Strip pixel data too short: ${pixelData.length} < $expectedBytes');
+    if (data.length < 16 + expectedRgbaBytes) {
+      debugPrint('[VideoStream] Strip pixel data too short: ${data.length} < ${16 + expectedRgbaBytes}');
       return;
+    }
+    
+    final pixelData = data.sublist(16, 16 + expectedRgbaBytes);
+    
+    // Extract PSD dB values (Float32, after RGBA data)
+    final psdStart = 16 + expectedRgbaBytes;
+    final expectedPsdBytes = stripWidth * 4;  // Float32 = 4 bytes per element
+    Float32List? psdData;
+    if (data.length >= psdStart + expectedPsdBytes) {
+      // Create view of Float32 data
+      psdData = Float32List.view(
+        data.buffer, 
+        data.offsetInBytes + psdStart, 
+        stripWidth
+      );
     }
     
     // Initialize buffer if needed
@@ -384,14 +398,14 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       
       // PASTE: Copy new strip to bottom of buffer
       final bottomStart = _pixelBuffer!.length - shiftBytes;
-      _pixelBuffer!.setRange(bottomStart, bottomStart + expectedBytes, pixelData);
+      _pixelBuffer!.setRange(bottomStart, bottomStart + expectedRgbaBytes, pixelData);
     }
     
     // Cull old detections
     final cutoffRow = totalRows - _bufferHeight;
     _detectionBuffer = _detectionBuffer.where((d) => d.absoluteRow >= cutoffRow).toList();
     
-    // Update state
+    // Update state with PSD data
     state = state.copyWith(
       pixelBuffer: _pixelBuffer,
       frameCount: state.frameCount + 1,
@@ -400,6 +414,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       rowsPerStrip: rowsInStrip,
       currentPts: pts.toDouble(),
       detections: List.from(_detectionBuffer),
+      psd: psdData,
     );
   }
 
@@ -499,6 +514,48 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent time span command: ${seconds}s');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
+  }
+
+  void setFps(int fps) {
+    debugPrint('[VideoStream] setFps: $fps');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot set FPS - not connected');
+      return;
+    }
+    
+    final msg = json.encode({
+      'command': 'set_fps',
+      'fps': fps,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent FPS command: ${fps}fps');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
+  }
+
+  void setScoreThreshold(double threshold) {
+    debugPrint('[VideoStream] setScoreThreshold: $threshold');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot set score threshold - not connected');
+      return;
+    }
+    
+    final msg = json.encode({
+      'command': 'set_score_threshold',
+      'threshold': threshold,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent score threshold command: ${(threshold * 100).toInt()}%');
     } catch (e) {
       debugPrint('[VideoStream] Send FAILED: $e');
     }

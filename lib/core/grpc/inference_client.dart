@@ -209,16 +209,10 @@ class UnifiedPipelineManager {
 
   void _handleMessage(dynamic message) {
     try {
-      // BINARY message = waterfall row (pre-rendered RGBA)
+      // BINARY message - ignore, this client uses /ws/unified which is deprecated
+      // The new video stream uses /ws/video with a different binary format
       if (message is List<int>) {
-        final data = message is Uint8List ? message : Uint8List.fromList(message);
-        
-        // Check message type byte
-        if (data.isNotEmpty && data[0] == 0x01) {
-          // Waterfall binary message
-          final row = WaterfallRow.fromBinary(data);
-          _waterfallController.add(row);
-        }
+        // Silently ignore binary messages - they're for the video stream
         return;
       }
       

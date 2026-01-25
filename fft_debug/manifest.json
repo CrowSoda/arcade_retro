@@ -1,0 +1,996 @@
+[
+  {
+    "file": "chunk_0000_waterfall_032252_691719.npy",
+    "chunk": 0,
+    "timestamp": "032252_691719",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -52.913780212402344,
+    "max_db": 56.91985321044922,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0030_waterfall_032253_956993.npy",
+    "chunk": 30,
+    "timestamp": "032253_956993",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -56.96192932128906,
+    "max_db": 52.26405715942383,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0060_waterfall_032255_043508.npy",
+    "chunk": 60,
+    "timestamp": "032255_043508",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.082496643066406,
+    "max_db": 52.16238021850586,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0090_waterfall_032256_191250.npy",
+    "chunk": 90,
+    "timestamp": "032256_191250",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -57.86138153076172,
+    "max_db": 52.31368637084961,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0120_waterfall_032257_370073.npy",
+    "chunk": 120,
+    "timestamp": "032257_370073",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -57.01592254638672,
+    "max_db": 52.08595275878906,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0150_waterfall_032258_637209.npy",
+    "chunk": 150,
+    "timestamp": "032258_637209",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.60786819458008,
+    "max_db": 51.94078826904297,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0180_waterfall_032259_860861.npy",
+    "chunk": 180,
+    "timestamp": "032259_860861",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -52.07777404785156,
+    "max_db": 52.559757232666016,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0210_waterfall_032301_028986.npy",
+    "chunk": 210,
+    "timestamp": "032301_028986",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -50.63575744628906,
+    "max_db": 52.4968147277832,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0240_waterfall_032302_195100.npy",
+    "chunk": 240,
+    "timestamp": "032302_195100",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -51.16689682006836,
+    "max_db": 52.21631622314453,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0270_waterfall_032303_349998.npy",
+    "chunk": 270,
+    "timestamp": "032303_349998",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -51.300193786621094,
+    "max_db": 52.15911102294922,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0300_waterfall_032304_493960.npy",
+    "chunk": 300,
+    "timestamp": "032304_493960",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -48.18088912963867,
+    "max_db": 51.903839111328125,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0330_waterfall_032305_641540.npy",
+    "chunk": 330,
+    "timestamp": "032305_641540",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -59.285247802734375,
+    "max_db": 52.331756591796875,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0360_waterfall_032306_787245.npy",
+    "chunk": 360,
+    "timestamp": "032306_787245",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.007232666015625,
+    "max_db": 52.24671936035156,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0390_waterfall_032307_940591.npy",
+    "chunk": 390,
+    "timestamp": "032307_940591",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -50.03623962402344,
+    "max_db": 52.10628128051758,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0420_waterfall_032309_177052.npy",
+    "chunk": 420,
+    "timestamp": "032309_177052",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.58024215698242,
+    "max_db": 52.15924835205078,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0450_waterfall_032310_317943.npy",
+    "chunk": 450,
+    "timestamp": "032310_317943",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.54342269897461,
+    "max_db": 52.3725471496582,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0480_waterfall_032311_481214.npy",
+    "chunk": 480,
+    "timestamp": "032311_481214",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -52.76611328125,
+    "max_db": 52.613502502441406,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0510_waterfall_032312_633301.npy",
+    "chunk": 510,
+    "timestamp": "032312_633301",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -50.74811553955078,
+    "max_db": 52.44855880737305,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0540_waterfall_032313_814931.npy",
+    "chunk": 540,
+    "timestamp": "032313_814931",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -45.1322021484375,
+    "max_db": 52.321773529052734,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0570_waterfall_032314_959915.npy",
+    "chunk": 570,
+    "timestamp": "032314_959915",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.7099723815918,
+    "max_db": 52.24348449707031,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0600_waterfall_032316_146882.npy",
+    "chunk": 600,
+    "timestamp": "032316_146882",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -51.857032775878906,
+    "max_db": 52.377769470214844,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0630_waterfall_032317_331958.npy",
+    "chunk": 630,
+    "timestamp": "032317_331958",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -54.57383728027344,
+    "max_db": 51.846527099609375,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0660_waterfall_032318_565300.npy",
+    "chunk": 660,
+    "timestamp": "032318_565300",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -54.782630920410156,
+    "max_db": 52.56267547607422,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0690_waterfall_032319_764122.npy",
+    "chunk": 690,
+    "timestamp": "032319_764122",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.573081970214844,
+    "max_db": 77.65562438964844,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0720_waterfall_032320_909931.npy",
+    "chunk": 720,
+    "timestamp": "032320_909931",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -59.720458984375,
+    "max_db": 81.52418518066406,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0750_waterfall_032322_133450.npy",
+    "chunk": 750,
+    "timestamp": "032322_133450",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.662498474121094,
+    "max_db": 78.39763641357422,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0780_waterfall_032324_220467.npy",
+    "chunk": 780,
+    "timestamp": "032324_220467",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.98783874511719,
+    "max_db": 81.63627624511719,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0810_waterfall_032326_334252.npy",
+    "chunk": 810,
+    "timestamp": "032326_334252",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -46.2374267578125,
+    "max_db": 80.98811340332031,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0840_waterfall_032328_420446.npy",
+    "chunk": 840,
+    "timestamp": "032328_420446",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.89344024658203,
+    "max_db": 44.46468734741211,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0870_waterfall_032330_521298.npy",
+    "chunk": 870,
+    "timestamp": "032330_521298",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -48.535953521728516,
+    "max_db": 43.06700897216797,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0900_waterfall_032331_713756.npy",
+    "chunk": 900,
+    "timestamp": "032331_713756",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -45.25000762939453,
+    "max_db": 64.55786895751953,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0930_waterfall_032332_864760.npy",
+    "chunk": 930,
+    "timestamp": "032332_864760",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -50.55060958862305,
+    "max_db": 61.72377014160156,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0960_waterfall_032333_990300.npy",
+    "chunk": 960,
+    "timestamp": "032333_990300",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.80879211425781,
+    "max_db": 69.43072509765625,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_0990_waterfall_032335_067863.npy",
+    "chunk": 990,
+    "timestamp": "032335_067863",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.086997985839844,
+    "max_db": 68.8844223022461,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1020_waterfall_032336_133343.npy",
+    "chunk": 1020,
+    "timestamp": "032336_133343",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -63.153404235839844,
+    "max_db": 68.96818542480469,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1050_waterfall_032337_232591.npy",
+    "chunk": 1050,
+    "timestamp": "032337_232591",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -56.033966064453125,
+    "max_db": 71.08984375,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1080_waterfall_032338_397100.npy",
+    "chunk": 1080,
+    "timestamp": "032338_397100",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.42308044433594,
+    "max_db": 69.43467712402344,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1110_waterfall_032339_577207.npy",
+    "chunk": 1110,
+    "timestamp": "032339_577207",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -50.68889617919922,
+    "max_db": 68.56607055664062,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1140_waterfall_032340_775532.npy",
+    "chunk": 1140,
+    "timestamp": "032340_775532",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.09197235107422,
+    "max_db": 47.740501403808594,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1170_waterfall_032342_016822.npy",
+    "chunk": 1170,
+    "timestamp": "032342_016822",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -57.305198669433594,
+    "max_db": 48.19993591308594,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1200_waterfall_032343_302491.npy",
+    "chunk": 1200,
+    "timestamp": "032343_302491",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -59.790428161621094,
+    "max_db": 51.02622604370117,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1230_waterfall_032344_564641.npy",
+    "chunk": 1230,
+    "timestamp": "032344_564641",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -57.78181076049805,
+    "max_db": 52.10050582885742,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1260_waterfall_032345_870654.npy",
+    "chunk": 1260,
+    "timestamp": "032345_870654",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -59.5463981628418,
+    "max_db": 50.987098693847656,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1290_waterfall_032347_219807.npy",
+    "chunk": 1290,
+    "timestamp": "032347_219807",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -47.52271270751953,
+    "max_db": 53.90568542480469,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1320_waterfall_032348_525423.npy",
+    "chunk": 1320,
+    "timestamp": "032348_525423",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -56.325469970703125,
+    "max_db": 58.003440856933594,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1350_waterfall_032349_675687.npy",
+    "chunk": 1350,
+    "timestamp": "032349_675687",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -47.78806686401367,
+    "max_db": 81.23043060302734,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1380_waterfall_032350_845576.npy",
+    "chunk": 1380,
+    "timestamp": "032350_845576",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -56.012123107910156,
+    "max_db": 69.74673461914062,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1410_waterfall_032351_984755.npy",
+    "chunk": 1410,
+    "timestamp": "032351_984755",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.97557067871094,
+    "max_db": 56.39110565185547,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1440_waterfall_032353_165396.npy",
+    "chunk": 1440,
+    "timestamp": "032353_165396",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -63.74557876586914,
+    "max_db": 71.84908294677734,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1470_waterfall_032354_323632.npy",
+    "chunk": 1470,
+    "timestamp": "032354_323632",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -58.29136657714844,
+    "max_db": 63.947601318359375,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1500_waterfall_032355_504516.npy",
+    "chunk": 1500,
+    "timestamp": "032355_504516",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -54.68305587768555,
+    "max_db": 59.566551208496094,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1530_waterfall_032356_652509.npy",
+    "chunk": 1530,
+    "timestamp": "032356_652509",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -72.25613403320312,
+    "max_db": 64.73408508300781,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1560_waterfall_032357_785326.npy",
+    "chunk": 1560,
+    "timestamp": "032357_785326",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.437225341796875,
+    "max_db": 70.45062255859375,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1590_waterfall_032358_903927.npy",
+    "chunk": 1590,
+    "timestamp": "032358_903927",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -58.710689544677734,
+    "max_db": 50.6651725769043,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1620_waterfall_032400_106194.npy",
+    "chunk": 1620,
+    "timestamp": "032400_106194",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -58.16646957397461,
+    "max_db": 53.63695526123047,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1650_waterfall_032401_293416.npy",
+    "chunk": 1650,
+    "timestamp": "032401_293416",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -49.91826629638672,
+    "max_db": 72.38473510742188,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1680_waterfall_032402_435189.npy",
+    "chunk": 1680,
+    "timestamp": "032402_435189",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -51.51987075805664,
+    "max_db": 66.59896850585938,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1710_waterfall_032403_562194.npy",
+    "chunk": 1710,
+    "timestamp": "032403_562194",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -54.3125114440918,
+    "max_db": 77.37156677246094,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1740_waterfall_032404_682852.npy",
+    "chunk": 1740,
+    "timestamp": "032404_682852",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -57.69383239746094,
+    "max_db": 77.92137145996094,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1770_waterfall_032405_840175.npy",
+    "chunk": 1770,
+    "timestamp": "032405_840175",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.95326232910156,
+    "max_db": 77.4582748413086,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1800_waterfall_032407_010161.npy",
+    "chunk": 1800,
+    "timestamp": "032407_010161",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -44.36542510986328,
+    "max_db": 78.26751708984375,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1830_waterfall_032408_136974.npy",
+    "chunk": 1830,
+    "timestamp": "032408_136974",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -48.75463104248047,
+    "max_db": 64.2304916381836,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1860_waterfall_032409_281323.npy",
+    "chunk": 1860,
+    "timestamp": "032409_281323",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.16830062866211,
+    "max_db": 81.05750274658203,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1890_waterfall_032410_390635.npy",
+    "chunk": 1890,
+    "timestamp": "032410_390635",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -54.45677947998047,
+    "max_db": 77.56829071044922,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1920_waterfall_032411_543966.npy",
+    "chunk": 1920,
+    "timestamp": "032411_543966",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -51.98752975463867,
+    "max_db": 66.50633239746094,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1950_waterfall_032412_648121.npy",
+    "chunk": 1950,
+    "timestamp": "032412_648121",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -55.180389404296875,
+    "max_db": 80.69187927246094,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_1980_waterfall_032413_784679.npy",
+    "chunk": 1980,
+    "timestamp": "032413_784679",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -66.63714599609375,
+    "max_db": 69.41511535644531,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_2010_waterfall_032414_978814.npy",
+    "chunk": 2010,
+    "timestamp": "032414_978814",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -58.591922760009766,
+    "max_db": 77.14910888671875,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_2040_waterfall_032416_116948.npy",
+    "chunk": 2040,
+    "timestamp": "032416_116948",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -58.54560470581055,
+    "max_db": 68.42097473144531,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_2070_waterfall_032417_281886.npy",
+    "chunk": 2070,
+    "timestamp": "032417_281886",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.663970947265625,
+    "max_db": 71.11083984375,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  },
+  {
+    "file": "chunk_2100_waterfall_032418_462733.npy",
+    "chunk": 2100,
+    "timestamp": "032418_462733",
+    "shape": [
+      19,
+      65536
+    ],
+    "min_db": -53.0274772644043,
+    "max_db": 68.09383392333984,
+    "has_detection": false,
+    "detection_count": 0,
+    "detections": []
+  }
+]

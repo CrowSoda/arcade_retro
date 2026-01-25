@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/theme.dart';
+import '../live_detection/providers/video_stream_provider.dart';
 
 /// Auto-tune delay setting (null = disabled, otherwise seconds)
 final autoTuneDelayProvider = StateProvider<int?>((ref) => null);  // Disabled by default
 
 /// Score threshold for detection filtering (0.0 - 1.0)
-/// Default 0.9 (90%) - only show high confidence detections
-final scoreThresholdProvider = StateProvider<double>((ref) => 0.9);
+/// Default 0.5 (50%) - matches backend default
+final scoreThresholdProvider = StateProvider<double>((ref) => 0.5);
 
 /// Waterfall display time span in seconds
-/// Controls how many seconds of data the waterfall shows
-/// Default 5s - good balance of detail and history
-final waterfallTimeSpanProvider = StateProvider<double>((ref) => 5.0);
+/// FIXED at 2.5s for optimal performance - larger buffers cause FPS drops
+/// UI controls removed to simplify UX
+final waterfallTimeSpanProvider = StateProvider<double>((ref) => 2.5);
+
+/// Waterfall FPS setting (frames per second)
+/// Controls how fast the waterfall streams
+/// Default 30fps - full speed
+final waterfallFpsProvider = StateProvider<int>((ref) => 30);
 
 /// Settings Screen - Configuration and connection settings
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -117,8 +123,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             title: 'Display',
             icon: Icons.display_settings,
             children: [
-              const _WaterfallTimeSpanSelector(),
-              const SizedBox(height: 16),
+              // =============================================================
+              // WATERFALL SIZE/FPS SETTINGS - DISABLED
+              // Hardcoded to 2.5s @ 30fps for optimal performance.
+              // Larger buffers cause FPS drops. Re-enable if needed for debugging.
+              // =============================================================
+              // const _WaterfallTimeSpanSelector(),
+              // const SizedBox(height: 16),
+              // const _WaterfallFpsSelector(),
+              // const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
@@ -499,6 +512,14 @@ class _DelayOption extends StatelessWidget {
 class _WaterfallTimeSpanSelector extends ConsumerWidget {
   const _WaterfallTimeSpanSelector();
 
+  String _formatTimeSpan(double seconds) {
+    if (seconds < 1.0) {
+      return '${(seconds * 1000).round()}ms';
+    } else {
+      return '${seconds.toStringAsFixed(0)}s';
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final timeSpan = ref.watch(waterfallTimeSpanProvider);
@@ -523,7 +544,7 @@ class _WaterfallTimeSpanSelector extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                '${timeSpan.toStringAsFixed(0)}s',
+                _formatTimeSpan(timeSpan),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   color: G20Colors.primary,
@@ -541,41 +562,68 @@ class _WaterfallTimeSpanSelector extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 12),
+        // First row - short durations
         Row(
           children: [
+            _TimeSpanOption(
+              label: '200ms',
+              value: 0.2,
+              selected: (timeSpan - 0.2).abs() < 0.05,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 0.2,
+            ),
+            const SizedBox(width: 6),
+            _TimeSpanOption(
+              label: '500ms',
+              value: 0.5,
+              selected: (timeSpan - 0.5).abs() < 0.05,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 0.5,
+            ),
+            const SizedBox(width: 6),
             _TimeSpanOption(
               label: '1s',
               value: 1.0,
               selected: (timeSpan - 1.0).abs() < 0.1,
               onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 1.0,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             _TimeSpanOption(
               label: '2s',
               value: 2.0,
               selected: (timeSpan - 2.0).abs() < 0.1,
               onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 2.0,
             ),
-            const SizedBox(width: 8),
+          ],
+        ),
+        const SizedBox(height: 6),
+        // Second row - longer durations
+        Row(
+          children: [
             _TimeSpanOption(
               label: '5s',
               value: 5.0,
               selected: (timeSpan - 5.0).abs() < 0.1,
               onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 5.0,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             _TimeSpanOption(
               label: '10s',
               value: 10.0,
               selected: (timeSpan - 10.0).abs() < 0.1,
               onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 10.0,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             _TimeSpanOption(
               label: '30s',
               value: 30.0,
               selected: (timeSpan - 30.0).abs() < 0.1,
               onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 30.0,
+            ),
+            const SizedBox(width: 6),
+            _TimeSpanOption(
+              label: '60s',
+              value: 60.0,
+              selected: (timeSpan - 60.0).abs() < 0.1,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 60.0,
             ),
           ],
         ),
@@ -627,9 +675,167 @@ class _TimeSpanOption extends StatelessWidget {
   }
 }
 
+/// Waterfall FPS selector - controls streaming speed for debugging
+class _WaterfallFpsSelector extends ConsumerWidget {
+  const _WaterfallFpsSelector();
+
+  void _setFps(WidgetRef ref, int newFps) {
+    debugPrint('[Settings] FPS button tapped: $newFps');
+    
+    // Update provider state
+    ref.read(waterfallFpsProvider.notifier).state = newFps;
+    
+    // DIRECT CALL to backend - no listener needed!
+    ref.read(videoStreamProvider.notifier).setFps(newFps);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fps = ref.watch(waterfallFpsProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Stream FPS',
+              style: TextStyle(
+                fontSize: 14,
+                color: G20Colors.textPrimaryDark,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: fps < 30 
+                    ? Colors.orange.withValues(alpha: 0.2)
+                    : G20Colors.primary.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${fps}fps',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: fps < 30 ? Colors.orange : G20Colors.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Slow down waterfall for debugging (affects data rate)',
+          style: TextStyle(
+            fontSize: 11,
+            color: G20Colors.textSecondaryDark,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _FpsOption(
+              label: '1',
+              value: 1,
+              selected: fps == 1,
+              onTap: () => _setFps(ref, 1),
+            ),
+            const SizedBox(width: 6),
+            _FpsOption(
+              label: '5',
+              value: 5,
+              selected: fps == 5,
+              onTap: () => _setFps(ref, 5),
+            ),
+            const SizedBox(width: 6),
+            _FpsOption(
+              label: '10',
+              value: 10,
+              selected: fps == 10,
+              onTap: () => _setFps(ref, 10),
+            ),
+            const SizedBox(width: 6),
+            _FpsOption(
+              label: '15',
+              value: 15,
+              selected: fps == 15,
+              onTap: () => _setFps(ref, 15),
+            ),
+            const SizedBox(width: 6),
+            _FpsOption(
+              label: '30',
+              value: 30,
+              selected: fps == 30,
+              onTap: () => _setFps(ref, 30),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _FpsOption extends StatelessWidget {
+  final String label;
+  final int value;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FpsOption({
+    required this.label,
+    required this.value,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Highlight slow FPS options with orange
+    final isSlowFps = value < 30;
+    final activeColor = isSlowFps ? Colors.orange : G20Colors.primary;
+    
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? activeColor.withValues(alpha: 0.2) : G20Colors.cardDark,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: selected ? activeColor : G20Colors.cardDark,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? activeColor : G20Colors.textSecondaryDark,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Score threshold selector widget with slider and quick-select buttons
 class _ScoreThresholdSelector extends ConsumerWidget {
   const _ScoreThresholdSelector();
+
+  void _setScoreThreshold(WidgetRef ref, double newThreshold) {
+    debugPrint('[Settings] Score threshold changed: ${(newThreshold * 100).round()}%');
+    
+    // Update provider state
+    ref.read(scoreThresholdProvider.notifier).state = newThreshold;
+    
+    // DIRECT CALL to backend - no listener needed!
+    ref.read(videoStreamProvider.notifier).setScoreThreshold(newThreshold);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -680,7 +886,8 @@ class _ScoreThresholdSelector extends ConsumerWidget {
           max: 1.0,
           divisions: 20,
           label: '$percentage%',
-          onChanged: (v) => ref.read(scoreThresholdProvider.notifier).state = v,
+          onChanged: (v) => _setScoreThreshold(ref, v),
+          onChangeEnd: (v) => _setScoreThreshold(ref, v),  // Send on release
         ),
         const SizedBox(height: 8),
         Row(
@@ -689,28 +896,28 @@ class _ScoreThresholdSelector extends ConsumerWidget {
               label: '50%',
               value: 0.5,
               selected: (threshold - 0.5).abs() < 0.01,
-              onTap: () => ref.read(scoreThresholdProvider.notifier).state = 0.5,
+              onTap: () => _setScoreThreshold(ref, 0.5),
             ),
             const SizedBox(width: 8),
             _ThresholdOption(
               label: '75%',
               value: 0.75,
               selected: (threshold - 0.75).abs() < 0.01,
-              onTap: () => ref.read(scoreThresholdProvider.notifier).state = 0.75,
+              onTap: () => _setScoreThreshold(ref, 0.75),
             ),
             const SizedBox(width: 8),
             _ThresholdOption(
               label: '90%',
               value: 0.9,
               selected: (threshold - 0.9).abs() < 0.01,
-              onTap: () => ref.read(scoreThresholdProvider.notifier).state = 0.9,
+              onTap: () => _setScoreThreshold(ref, 0.9),
             ),
             const SizedBox(width: 8),
             _ThresholdOption(
               label: '95%',
               value: 0.95,
               selected: (threshold - 0.95).abs() < 0.01,
-              onTap: () => ref.read(scoreThresholdProvider.notifier).state = 0.95,
+              onTap: () => _setScoreThreshold(ref, 0.95),
             ),
           ],
         ),

@@ -6,6 +6,7 @@ import 'providers/detection_provider.dart';
 import 'providers/map_provider.dart';
 import 'providers/inference_provider.dart';
 import 'providers/video_stream_provider.dart';
+import '../settings/settings_screen.dart' show waterfallFpsProvider;
 import 'widgets/waterfall_display.dart';
 import 'widgets/video_waterfall_display.dart';
 import 'widgets/psd_chart.dart';
@@ -28,6 +29,8 @@ class LiveDetectionScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
+  int _lastPruneRow = 0;  // Track last prune to avoid excessive calls
+  
   @override
   void initState() {
     super.initState();
@@ -45,7 +48,6 @@ class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
         
         detectionNotifier.addDetections(converted);
         
-        debugPrint('[LiveDetection] Forwarded ${converted.length} detections to table/map');
       });
       
       // Connect to video stream
@@ -60,6 +62,43 @@ class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
     
     final displayMode = ref.watch(displayModeProvider);
     final isCollapsed = ref.watch(rightPanelCollapsedProvider);
+    
+    // FPS CONTROL: Listen for FPS changes and send to backend
+    ref.listen<int>(waterfallFpsProvider, (previous, next) {
+      final currentState = ref.read(videoStreamProvider);
+      if (previous != next && currentState.isConnected) {
+        ref.read(videoStreamProvider.notifier).setFps(next);
+      }
+    });
+    
+    // PSD BOX LIFECYCLE: Prune detections when waterfall scrolls or buffer changes
+    ref.listen<VideoStreamState>(videoStreamProvider, (previous, next) {
+      final detectionNotifier = ref.read(detectionProvider.notifier);
+      
+      // Clear all detections on reconnect (connection state changed to connected)
+      if (previous?.isConnected != true && next.isConnected) {
+        detectionNotifier.clearAll();
+        _lastPruneRow = 0;
+        debugPrint('[PSD Lifecycle] Connection established - cleared all detection boxes');
+        
+        // Send initial FPS if not default
+        final currentFps = ref.read(waterfallFpsProvider);
+        if (currentFps != 30) {
+          ref.read(videoStreamProvider.notifier).setFps(currentFps);
+        }
+        return;
+      }
+      
+      // Prune detections that have scrolled off based on absoluteRow
+      // Only prune every ~30 rows (about 1 frame) to avoid excessive overhead
+      final currentRow = next.totalRowsReceived;
+      final bufferHeight = next.bufferHeight;
+      
+      if (currentRow - _lastPruneRow >= 30 && bufferHeight > 0) {
+        detectionNotifier.pruneByAbsoluteRow(currentRow, bufferHeight);
+        _lastPruneRow = currentRow;
+      }
+    });
 
     return Scaffold(
       backgroundColor: G20Colors.backgroundDark,

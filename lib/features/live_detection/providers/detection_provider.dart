@@ -22,6 +22,7 @@ class Detection {
   final bool isActive;
   final int trackId;
   final double pts;          // Presentation timestamp - used to scroll with waterfall
+  final int absoluteRow;     // Absolute row index when detection was made (for row-based pruning)
 
   const Detection({
     required this.id,
@@ -42,6 +43,7 @@ class Detection {
     this.isActive = true,
     this.trackId = 0,
     this.pts = 0.0,
+    this.absoluteRow = 0,
   });
 
   Detection copyWith({
@@ -63,6 +65,7 @@ class Detection {
     bool? isActive,
     int? trackId,
     double? pts,
+    int? absoluteRow,
   }) {
     return Detection(
       id: id ?? this.id,
@@ -83,6 +86,7 @@ class Detection {
       isActive: isActive ?? this.isActive,
       trackId: trackId ?? this.trackId,
       pts: pts ?? this.pts,
+      absoluteRow: absoluteRow ?? this.absoluteRow,
     );
   }
 }
@@ -271,6 +275,22 @@ class DetectionNotifier extends StateNotifier<List<Detection>> {
     final minPts = currentPts - displayTimeSpan;
     state = state.where((det) => det.pts >= minPts).toList();
   }
+
+  /// Remove detections that have scrolled off based on absolute row position
+  /// This is the preferred method for PSD box lifecycle management
+  /// 
+  /// [currentRow] - The current total rows received (bottom of waterfall)
+  /// [bufferHeight] - The visible buffer height in rows
+  void pruneByAbsoluteRow(int currentRow, int bufferHeight) {
+    final cutoffRow = currentRow - bufferHeight;
+    final before = state.length;
+    state = state.where((det) => det.absoluteRow >= cutoffRow).toList();
+    final after = state.length;
+    if (before != after) {
+      // Debug logging - can be removed in production
+      // debugPrint('[Detection] Pruned ${before - after} boxes, $after remaining');
+    }
+  }
 }
 
 /// Provider for detections
@@ -361,5 +381,6 @@ Detection convertVideoDetection(video_stream.VideoDetection vd, double pts) {
     timestamp: DateTime.now(),
     trackId: vd.detectionId,
     pts: pts,
+    absoluteRow: vd.absoluteRow,  // Pass through for row-based pruning
   );
 }

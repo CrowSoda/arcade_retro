@@ -12,7 +12,7 @@ import '../../../core/config/theme.dart';
 import '../../../core/services/backend_launcher.dart';
 import '../providers/video_stream_provider.dart';
 import '../providers/map_provider.dart' show getSOIColor, soiVisibilityProvider;
-import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider;
+import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider, waterfallFpsProvider;
 
 /// Waterfall display using row-strip streaming
 class VideoWaterfallDisplay extends ConsumerStatefulWidget {
@@ -85,12 +85,25 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
       }
     });
     
-    // Send initial time span when connection state changes to connected
+    // Listen for FPS changes and send to backend
+    ref.listen<int>(waterfallFpsProvider, (previous, next) {
+      final currentState = ref.read(videoStreamProvider);
+      debugPrint('[Waterfall] FPS listener fired: $previous → $next, connected: ${currentState.isConnected}');
+      if (previous != next && currentState.isConnected) {
+        ref.read(videoStreamProvider.notifier).setFps(next);
+      }
+    });
+    
+    // Send initial time span and FPS when connection state changes to connected
     ref.listen<VideoStreamState>(videoStreamProvider, (previous, next) {
       if (previous?.isConnected != true && next.isConnected) {
         final currentTimeSpan = ref.read(waterfallTimeSpanProvider);
         if ((currentTimeSpan - 5.0).abs() > 0.1) {
           ref.read(videoStreamProvider.notifier).setTimeSpan(currentTimeSpan);
+        }
+        final currentFps = ref.read(waterfallFpsProvider);
+        if (currentFps != 30) {
+          ref.read(videoStreamProvider.notifier).setFps(currentFps);
         }
       }
     });
@@ -427,6 +440,9 @@ class _VideoFrequencyAxis extends StatelessWidget {
   }
 }
 
+// Debug counter for _DetectionOverlayLayer - outside class for Dart static semantics
+int _waterfallDebugCounter = 0;
+
 /// Detection overlay layer with ROW-INDEX positioning
 /// 
 /// Detection.absoluteRow = which row the detection was made at
@@ -453,21 +469,27 @@ class _DetectionOverlayLayer extends ConsumerWidget {
       builder: (context, constraints) {
         final plotWidth = constraints.maxWidth;
         final plotHeight = constraints.maxHeight;
-        
-        // Pixels per row
         final pixelsPerRow = bufferHeight > 0 ? plotHeight / bufferHeight : 1.0;
         
         final visibleBoxes = <Widget>[];
+        
+        _waterfallDebugCounter++;
         
         for (final det in detections) {
           // Check visibility toggle
           final isVisible = ref.watch(soiVisibilityProvider(det.className));
           if (!isVisible) continue;
           
-          // === FREQUENCY AXIS (X) - from y1/y2 ===
-          final left = det.y1 * plotWidth;
-          final right = det.y2 * plotWidth;
-          final boxWidth = (right - left).abs();
+          // === FREQUENCY AXIS (X) - from y1/y2 with 20% padding ===
+          // NOTE: Frequency axis is FLIPPED (1.0 - y) to match waterfall display
+          final detWidth = det.y2 - det.y1;
+          final freqPadding = detWidth * 0.2;  // 20% padding each side
+          final paddedY1 = (det.y1 - freqPadding).clamp(0.0, 1.0);
+          final paddedY2 = (det.y2 + freqPadding).clamp(0.0, 1.0);
+          // Flip: y1 becomes right, y2 becomes left
+          final left = (1.0 - paddedY2) * plotWidth;
+          final right = (1.0 - paddedY1) * plotWidth;
+          final boxWidth = (right - left).abs().clamp(8.0, plotWidth);
           
           // === TIME AXIS (Y) - ROW-INDEX positioning ===
           // How many rows ago was this detection?
@@ -476,8 +498,8 @@ class _DetectionOverlayLayer extends ConsumerWidget {
           // Skip if outside visible range
           if (rowsAgo < 0 || rowsAgo >= bufferHeight) continue;
           
-          // Box height from rowSpan
-          final boxHeight = (det.rowSpan * pixelsPerRow).clamp(8.0, plotHeight * 0.3);
+          // Box height from rowSpan - use model's actual output directly
+          final boxHeight = det.rowSpan * pixelsPerRow;
           
           // Y position: rowsAgo=0 → bottom, rowsAgo=bufferHeight → top
           final boxBottom = plotHeight - (rowsAgo * pixelsPerRow);
@@ -491,19 +513,15 @@ class _DetectionOverlayLayer extends ConsumerWidget {
           
           final color = getSOIColor(det.className);
           
-          // Debug info
-          final debugStr = 'row=${det.absoluteRow} ago=$rowsAgo';
-          
           visibleBoxes.add(
             Positioned(
               left: left.clamp(0.0, plotWidth - boxWidth),
               top: boxTop.clamp(0.0, plotHeight - boxHeight),
-              width: boxWidth.clamp(4.0, plotWidth),
-              height: boxHeight.clamp(8.0, plotHeight),
+              width: boxWidth,
+              height: boxHeight,
               child: _DetectionBoxWidget(
                 detection: det,
                 color: color,
-                debugInfo: debugStr,
               ),
             ),
           );
@@ -518,7 +536,7 @@ class _DetectionOverlayLayer extends ConsumerWidget {
   }
 }
 
-/// Individual detection box widget
+/// Individual detection box widget - simple colored rectangle (no text labels)
 class _DetectionBoxWidget extends StatelessWidget {
   final VideoDetection detection;
   final Color color;
@@ -532,46 +550,13 @@ class _DetectionBoxWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showDebug = debugInfo != null && debugInfo!.isNotEmpty;
-    
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
           color: color,
-          width: detection.isSelected ? 3 : 2,
+          width: 2,
         ),
-        color: color.withOpacity(detection.isSelected ? 0.25 : 0.1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-            color: color.withOpacity(0.85),
-            child: Text(
-              '${detection.className} ${(detection.confidence * 100).toStringAsFixed(0)}%',
-              style: const TextStyle(
-                fontSize: 8,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          if (showDebug)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-              color: Colors.black54,
-              child: Text(
-                debugInfo!,
-                style: const TextStyle(
-                  fontSize: 7,
-                  color: Colors.yellow,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-        ],
+        color: color.withOpacity(0.15),
       ),
     );
   }

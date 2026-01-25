@@ -1,18 +1,18 @@
 """
-Unified IQ Pipeline - VIDEO STREAMING VERSION
+Unified IQ Pipeline - ROW-STRIP STREAMING VERSION
 
 ARCHITECTURE:
-- Full frame waterfall buffer accumulated on backend
-- H.264/NVENC encoding (or JPEG fallback)
-- Single video stream + detection JSON over WebSocket
+- Row-strip streaming: backend sends FFT row strips, Flutter stitches locally
+- Raw RGBA pixels (no video encoding needed)
+- Detection boxes tracked by absolute row index for perfect sync
 
 PERFORMANCE:
-- Hardware video encoding: 2-6 Mbps vs 120+ Mbps raw pixels
+- ~310KB per frame (38 rows × 2048 width × 4 bytes RGBA)
+- 30fps = ~9.3 MB/s bandwidth
 - <60ms end-to-end latency
-- High resolution 2048x1024 waterfall
 
 INFERENCE: 4096 FFT, 2048 hop, 80dB (MUST MATCH TENSORCADE!)
-WATERFALL: 8192 FFT, 4096 hop, 80dB (high resolution display)
+WATERFALL: 32768 FFT, 16384 hop, 60dB (high resolution display)
 """
 
 import os
@@ -28,17 +28,13 @@ import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 import torch
 import torch.nn.functional as F
 
-# Global encoder instance for cleanup
-_encoder_instance = None
-
 def _cleanup():
     print("[Cleanup] Shutting down...", flush=True)
-    if _encoder_instance:
-        _encoder_instance.close()
     print("[Cleanup] Done", flush=True)
 
 atexit.register(_cleanup)
@@ -50,10 +46,6 @@ def _signal_handler(sig, frame):
 
 signal.signal(signal.SIGTERM, _signal_handler)
 signal.signal(signal.SIGINT, _signal_handler)
-
-# Import video streaming components
-from video_encoder import create_encoder, BaseEncoder
-from waterfall_buffer import WaterfallBuffer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("unified_pipeline")
@@ -96,6 +88,86 @@ def _generate_viridis_lut():
     return lut
 
 VIRIDIS_LUT = _generate_viridis_lut()
+
+
+# =============================================================================
+# FFT DEBUG OUTPUT - Save high-res PNGs with detection boxes overlaid
+# =============================================================================
+DEBUG_DIR = Path('/tmp/fft_debug') if sys.platform != 'win32' else BASE_DIR / 'fft_debug'
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+DEBUG_ENABLED = False  # Set to True to save PNG captures
+
+def capture_detection(fft_magnitude: np.ndarray, detection_boxes: list, chunk_index: int, label: str = ""):
+    """
+    Save high-res PNG with detection boxes drawn.
+    Call this when a detection happens.
+    
+    fft_magnitude: raw FFT data (2D numpy array, shape: time × freq)
+    detection_boxes: list of dicts with x1,y1,x2,y2 (normalized 0-1) and class_name
+    chunk_index: monotonic counter
+    """
+    if not DEBUG_ENABLED:
+        return
+    
+    try:
+        import matplotlib
+        matplotlib.use('Agg')  # Non-interactive backend
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        
+        timestamp = datetime.now().strftime('%H%M%S_%f')
+        
+        # Big figure for high resolution
+        fig, ax = plt.subplots(figsize=(20, 10))
+        
+        # Plot spectrogram (transpose so freq is Y axis)
+        im = ax.imshow(fft_magnitude.T, aspect='auto', origin='lower', cmap='viridis')
+        plt.colorbar(im, ax=ax, label='Magnitude (dB)')
+        
+        time_bins, freq_bins = fft_magnitude.shape
+        
+        # Draw detection boxes
+        for det in detection_boxes:
+            # Convert normalized coords (0-1) to pixel coords
+            # NOTE: In model output, x1/x2 = time axis, y1/y2 = freq axis
+            time_start = det['x1'] * time_bins
+            time_end = det['x2'] * time_bins
+            freq_start = det['y1'] * freq_bins
+            freq_end = det['y2'] * freq_bins
+            
+            rect = patches.Rectangle(
+                (time_start, freq_start),
+                time_end - time_start,
+                freq_end - freq_start,
+                fill=False, 
+                edgecolor='red', 
+                linewidth=2
+            )
+            ax.add_patch(rect)
+            
+            # Add label
+            class_name = det.get('class_name', 'unknown')
+            conf = det.get('confidence', 0)
+            ax.text(time_start, freq_end + 5, f'{class_name} {conf:.0%}', 
+                    color='red', fontsize=10, fontweight='bold')
+        
+        ax.set_xlabel('Time (FFT index)')
+        ax.set_ylabel('Frequency bin')
+        label_str = f" ({label})" if label else ""
+        ax.set_title(f'Detection #{chunk_index}{label_str} @ {timestamp}\nShape: {fft_magnitude.shape}, Range: [{fft_magnitude.min():.1f}, {fft_magnitude.max():.1f}] dB')
+        
+        # Save high-res PNG
+        filename = f'detection_{chunk_index:04d}_{timestamp}.png'
+        filepath = DEBUG_DIR / filename
+        plt.savefig(str(filepath), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f'[DEBUG] Saved {filename} ({len(detection_boxes)} boxes)', flush=True)
+        
+    except Exception as e:
+        print(f'[DEBUG] Failed to save detection capture: {e}', flush=True)
+        import traceback
+        traceback.print_exc()
 
 
 @dataclass
@@ -182,8 +254,8 @@ class TripleBufferedPipeline:
         # =====================================================
         # WATERFALL PARAMS - FOR DISPLAY ONLY (fast)
         # =====================================================
-        self.waterfall_fft_size = 32768  # 4× better frequency resolution (610 Hz/bin)
-        self.waterfall_hop = 16384  # 50% overlap
+        self.waterfall_fft_size = 65536  # 8× better frequency resolution (305 Hz/bin)
+        self.waterfall_hop = 32768  # 50% overlap
         self.waterfall_dynamic_range = 60.0  # Better contrast for display
         
         # Noise floor tracking (exponential moving average)
@@ -202,7 +274,7 @@ class TripleBufferedPipeline:
         
         # TWO SEPARATE WINDOWS
         self.inference_window = torch.hann_window(self.inference_fft_size, device=self.device)
-        self.waterfall_window = np.hanning(32768).astype(np.float32)
+        self.waterfall_window = np.hanning(65536).astype(np.float32)
         
         self.class_names = ['background', 'creamy_chicken']
         
@@ -292,17 +364,15 @@ class TripleBufferedPipeline:
                 det = Detection(
                     box_id=i,
                     x1=float(box[0]) / 1024,  # Normalized 0-1
-                    y1=float(box[1]) / 1024,
+                    y1=1.0 - (float(box[3]) / 1024),  # Flip Y axis and swap (y2->y1)
                     x2=float(box[2]) / 1024,
-                    y2=float(box[3]) / 1024,
+                    y2=1.0 - (float(box[1]) / 1024),  # Flip Y axis and swap (y1->y2)
                     confidence=float(scores[i]),
                     class_id=int(labels[i]),
                     class_name=self.class_names[int(labels[i])] if int(labels[i]) < len(self.class_names) else 'unknown',
                     parent_pts=pts,
                 )
                 detections.append(det)
-                # DEBUG: Print raw detection coordinates
-                print(f"[DET RAW] box_id={det.box_id} x1={det.x1:.3f} y1={det.y1:.3f} x2={det.x2:.3f} y2={det.y2:.3f} class={det.class_name} conf={det.confidence:.2f} pts={det.parent_pts:.3f}", flush=True)
         
         inference_ms = (time.perf_counter() - start_time) * 1000
         self.current_stream = (self.current_stream + 1) % self.num_streams
@@ -319,8 +389,8 @@ class TripleBufferedPipeline:
         Compute STFT spectrogram - returns MULTIPLE rows, one per time slice.
         Each row is a full FFT, preserving both time and frequency resolution.
         """
-        fft_size = self.waterfall_fft_size  # 8192
-        hop_size = fft_size // 2  # 50% overlap = 4096
+        fft_size = self.waterfall_fft_size  # 65536
+        hop_size = fft_size // 2  # 50% overlap = 32768
         
         # Calculate number of complete FFTs we can do
         num_ffts = (len(iq_data) - fft_size) // hop_size + 1
@@ -402,192 +472,6 @@ class TripleBufferedPipeline:
         return rgba.tobytes(), db_downsampled.tobytes(), self.noise_floor_db
 
 
-class WaterfallOnlyPipeline:
-    """Lightweight pipeline for waterfall display only - NO model loading."""
-    
-    def __init__(self):
-        self.waterfall_fft_size = 8192
-        self.waterfall_hop = 4096
-        self.waterfall_dynamic_range = 60.0
-        self.noise_floor_db = -60.0
-        self.noise_alpha = 0.02
-        self.waterfall_window = np.hanning(8192).astype(np.float32)
-    
-    def compute_waterfall_row_rgba(self, iq_data: np.ndarray, target_width: int = 1024) -> tuple:
-        """Compute waterfall row - returns (rgba_bytes, db_bytes, noise_floor_db)."""
-        fft_size = self.waterfall_fft_size
-        
-        if len(iq_data) >= fft_size:
-            segment = iq_data[-fft_size:]
-        else:
-            segment = np.pad(iq_data, (0, fft_size - len(iq_data)))
-        
-        segment = segment * self.waterfall_window
-        fft_data = np.fft.fftshift(np.fft.fft(segment))
-        db = 20 * np.log10(np.abs(fft_data) + 1e-6)
-        
-        # Max-pooling instead of decimation (preserves signal peaks)
-        stride = fft_size // target_width
-        if stride > 1:
-            truncated_len = target_width * stride
-            db_downsampled = db[:truncated_len].reshape(target_width, stride).max(axis=1).astype(np.float32)
-        else:
-            db_downsampled = db[:target_width].astype(np.float32)
-        
-        current_median = np.median(db_downsampled)
-        self.noise_floor_db = self.noise_alpha * current_median + (1 - self.noise_alpha) * self.noise_floor_db
-        
-        min_db = self.noise_floor_db - 5
-        max_db = self.noise_floor_db + self.waterfall_dynamic_range
-        
-        normalized = np.clip((db_downsampled - min_db) / (max_db - min_db), 0, 1)
-        indices = (normalized * 255).astype(np.uint8)
-        
-        rgb = VIRIDIS_LUT[indices]
-        rgba = np.zeros((target_width, 4), dtype=np.uint8)
-        rgba[:, :3] = rgb
-        rgba[:, 3] = 255
-        
-        return rgba.tobytes(), db_downsampled.tobytes(), self.noise_floor_db
-
-
-class UnifiedServer:
-    def __init__(self, iq_file: str, model_path: str):
-        self.iq_source = UnifiedIQSource(iq_file)
-        # Use lightweight waterfall-only pipeline - NO MODEL, NO GPU
-        self.pipeline = WaterfallOnlyPipeline()
-        
-        self.is_running = False
-        
-        logger.info("UnifiedServer: WATERFALL ONLY mode (no inference)")
-    
-    async def run_pipeline(self, websocket):
-        """
-        Main loop - OPTIMIZED BINARY PROTOCOL
-        
-        Binary waterfall message format:
-        - Byte 0: Message type (0x01 = waterfall)
-        - Bytes 1-4: Sequence ID (uint32, little-endian)
-        - Bytes 5-12: PTS (float64, little-endian)
-        - Bytes 13-16: Width (uint32, little-endian)
-        - Bytes 17 - (17 + width*4): RGBA pixel data (width * 4 bytes)
-        - Remaining: Float32 dB values for PSD (width * 4 bytes)
-        
-        Detections still use JSON (infrequent, small)
-        """
-        import json
-        
-        self.is_running = True
-        frame_count = 0
-        
-        logger.info("Pipeline started (30fps rate-limited)")
-        
-        while self.is_running:
-            try:
-                frame_start = time.perf_counter()  # For 30fps rate limiting
-                
-                chunk = self.iq_source.read_chunk(duration_ms=33)
-                
-                if chunk is None:
-                    await asyncio.sleep(0.01)
-                    continue
-                
-                # Compute waterfall RGBA + dB (2048 pixels wide for high resolution)
-                rgba_bytes, db_bytes, _ = self.pipeline.compute_waterfall_row_rgba(chunk.data, target_width=2048)
-                
-                # Pack binary header
-                header = struct.pack('<BBBBI d I', 
-                    0x01, 0x00, 0x00, 0x00,
-                    chunk.sequence_id,
-                    chunk.pts,
-                    2048
-                )
-                
-                # Send over WebSocket
-                await websocket.send(header + rgba_bytes + db_bytes)
-                
-                # NO INFERENCE - UnifiedServer only does waterfall (video pipeline handles inference)
-                
-                frame_count += 1
-                
-                # 30fps rate limiting - sleep to hit 33ms per frame
-                elapsed = time.perf_counter() - frame_start
-                sleep_time = max(0.001, 0.033 - elapsed)  # Target 33ms = 30fps
-                await asyncio.sleep(sleep_time)
-                
-            except Exception as e:
-                logger.error(f"Pipeline error: {e}")
-                import traceback
-                traceback.print_exc()
-                break
-        
-        logger.info(f"Pipeline stopped after {frame_count} frames")
-    
-    async def _run_inference_async(self, websocket, iq_data, pts, frame_id):
-        """Run inference in background thread - truly doesn't block waterfall loop."""
-        import json
-        
-        try:
-            # MUST use to_thread() - otherwise process_chunk() blocks the event loop!
-            result = await asyncio.to_thread(self.pipeline.process_chunk, iq_data, pts)
-            
-            det_list = [{
-                'detection_id': d.box_id,
-                'x1': d.x1, 'y1': d.y1, 'x2': d.x2, 'y2': d.y2,
-                'confidence': d.confidence,
-                'class_id': d.class_id,
-                'class_name': d.class_name,
-            } for d in result['detections']]
-            
-            msg = json.dumps({
-                'type': 'detection_frame',
-                'frame_id': frame_id,
-                'pts': result['pts'],
-                'inference_ms': result['inference_ms'],
-                'detections': det_list,
-            })
-            
-            await websocket.send(msg)
-            
-        except Exception as e:
-            logger.error(f"[INFERENCE ERROR] Frame {frame_id}: {e}")
-    
-    def stop(self):
-        self.is_running = False
-        self.iq_source.close()
-
-
-async def unified_ws_handler(websocket, iq_file: str, model_path: str):
-    """Legacy handler - uses row-by-row streaming."""
-    server = UnifiedServer(iq_file, model_path)
-    pipeline_task = asyncio.create_task(server.run_pipeline(websocket))
-    
-    try:
-        async for message in websocket:
-            # Only handle text messages (commands)
-            if isinstance(message, str):
-                data = json.loads(message)
-                cmd = data.get('command')
-                
-                if cmd == 'stop':
-                    server.stop()
-                    break
-                elif cmd == 'status':
-                    await websocket.send(json.dumps({
-                        'type': 'status',
-                        'is_running': server.is_running,
-                    }))
-    except Exception as e:
-        logger.error(f"Handler error: {e}")
-    finally:
-        server.stop()
-        pipeline_task.cancel()
-        try:
-            await pipeline_task
-        except asyncio.CancelledError:
-            pass
-
-
 # =============================================================================
 # ROW-STRIP STREAMING SERVER - Lightweight row-based waterfall streaming
 # =============================================================================
@@ -629,7 +513,8 @@ class VideoStreamServer:
         # Strip parameters
         self.video_width = video_width
         self.video_fps = video_fps
-        self.time_span_seconds = time_span_seconds
+        # Reduced from 5s to 2.5s for better rendering performance (~30fps target)
+        self.time_span_seconds = 2.5
         
         # Calculate rows_per_frame from FFT settings
         # At 20MHz sample rate, 33ms = 660,000 samples
@@ -659,12 +544,15 @@ class VideoStreamServer:
         self.is_running = False
         self.current_pts = 0.0
         
+        # Score threshold - user configurable
+        self.score_threshold = 0.5  # Default 50%, can be changed via command
+        
         # Row tracking for detection synchronization
         self.total_rows_written = 0  # Monotonic counter, never resets
         self.rows_this_frame = 0     # Rows added in current frame
         
-        # Suggested buffer height for Flutter client
-        self.suggested_buffer_height = int(time_span_seconds * video_fps * self.rows_per_frame)
+        # Suggested buffer height for Flutter client (uses 2.5s, not the parameter)
+        self.suggested_buffer_height = int(self.time_span_seconds * video_fps * self.rows_per_frame)
         
         logger.info(f"VideoStreamServer initialized (ROW-STRIP MODE):")
         logger.info(f"  Strip size: {self.video_width}x{self.rows_per_frame} (~38 rows per frame)")
@@ -733,11 +621,12 @@ class VideoStreamServer:
         
         logger.info(f"Row-strip pipeline started ({self.video_fps}fps, ~{self.rows_per_frame} rows/frame)")
         
-        frame_interval = 1.0 / self.video_fps
-        
         while self.is_running:
             try:
                 frame_start = time.perf_counter()
+                
+                # Dynamic FPS - read from self.video_fps each iteration
+                frame_interval = 1.0 / self.video_fps
                 
                 # Read IQ chunk
                 chunk = self.iq_source.read_chunk(duration_ms=33)
@@ -755,7 +644,18 @@ class VideoStreamServer:
                     # Convert dB to RGBA pixels
                     rgba_strip = self._db_to_rgba(db_rows, target_width=self.video_width)
                     
-                    # Pack strip message: header + raw RGBA bytes
+                    # Get the LAST row's dB values for PSD chart
+                    last_row_db = db_rows[-1]  # Most recent row
+                    # Resample to target width (same as _db_to_rgba does)
+                    stride = last_row_db.shape[0] // self.video_width
+                    if stride > 1:
+                        truncated_len = self.video_width * stride
+                        psd_db = last_row_db[:truncated_len].reshape(self.video_width, stride).max(axis=1).astype(np.float32)
+                    else:
+                        psd_db = last_row_db[:self.video_width].astype(np.float32)
+                    psd_bytes = psd_db.tobytes()
+                    
+                    # Pack strip message: header + raw RGBA bytes + PSD bytes
                     # Header: 16 bytes
                     #   - frame_id: uint32
                     #   - total_rows: uint32 (monotonic counter)
@@ -770,9 +670,9 @@ class VideoStreamServer:
                         self.current_pts
                     )
                     
-                    # Send strip: MSG_STRIP + header + RGBA bytes
+                    # Send strip: MSG_STRIP + header + RGBA bytes + PSD bytes
                     strip_bytes = rgba_strip.tobytes()
-                    await websocket.send(bytes([self.MSG_STRIP]) + header + strip_bytes)
+                    await websocket.send(bytes([self.MSG_STRIP]) + header + strip_bytes + psd_bytes)
                     
                     # Update row counter AFTER sending
                     self.total_rows_written += self.rows_this_frame
@@ -844,25 +744,30 @@ class VideoStreamServer:
         try:
             # Capture row state BEFORE inference (inference may take time)
             base_row = self.total_rows_written
-            rows_in_frame = self.rows_this_frame if self.rows_this_frame > 0 else 38  # Default estimate
+            rows_per_single_frame = self.rows_this_frame if self.rows_this_frame > 0 else 38  # Default estimate
+            
+            # IMPORTANT: Inference runs on inference_chunk_count frames combined (6 frames)
+            # So the total rows in the inference window is rows_per_frame × chunk_count
+            total_inference_rows = rows_per_single_frame * self.inference_chunk_count
             
             # Add 30 second timeout to detect if inference is hanging
+            # Use server's score_threshold (user configurable)
             result = await asyncio.wait_for(
-                asyncio.to_thread(self.pipeline.process_chunk, iq_data, pts),
+                asyncio.to_thread(self.pipeline.process_chunk, iq_data, pts, self.score_threshold),
                 timeout=30.0
             )
             
             # Build detection list WITH ROW OFFSET for perfect sync
-            # Detection x1/x2 is time axis (0-1), maps to row_offset within frame
+            # Use the model's ACTUAL bounding box output directly
             det_list = [{
                 'detection_id': d.box_id,
                 'x1': d.x1, 'y1': d.y1, 'x2': d.x2, 'y2': d.y2,
                 'confidence': d.confidence,
                 'class_id': d.class_id,
                 'class_name': d.class_name,
-                # ROW SYNC: x1 is time position (0-1), maps to row within frame
-                'row_offset': int(d.x1 * rows_in_frame),
-                'row_span': max(1, int((d.x2 - d.x1) * rows_in_frame)),
+                # ROW SYNC: Direct conversion from model's x coordinates
+                'row_offset': int(d.x1 * total_inference_rows),
+                'row_span': max(1, int((d.x2 - d.x1) * total_inference_rows)),
             } for d in result['detections']]
             
             # STORE DETECTIONS for rendering on video frame
@@ -875,7 +780,7 @@ class VideoStreamServer:
                 'inference_ms': result['inference_ms'],
                 # ROW SYNC: Send row tracking info for Flutter positioning
                 'base_row': base_row,
-                'rows_in_frame': rows_in_frame,
+                'rows_in_frame': total_inference_rows,  # Now includes all 6 frames worth of rows
                 'detections': det_list,
             })
             
@@ -899,24 +804,16 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
     
     try:
         async for message in websocket:
-            print(f"[WS RECV] *** MESSAGE RECEIVED ***", flush=True)
-            print(f"[WS RECV] Type: {type(message)}", flush=True)
-            
             try:
                 # Handle both bytes and string
                 if isinstance(message, bytes):
-                    print(f"[WS RECV] Got BYTES ({len(message)} bytes), decoding...", flush=True)
                     message = message.decode('utf-8')
                 
                 if isinstance(message, str):
-                    print(f"[WS RECV] Text message: {message[:200]}", flush=True)
                     data = json.loads(message)
                     cmd = data.get('command')
-                    print(f"[WS RECV] Command: {cmd}", flush=True)
             except Exception as e:
-                print(f"[WS RECV ERROR] Failed to process message: {e}", flush=True)
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Failed to process message: {e}")
                 continue
             
             if isinstance(message, str):
@@ -970,6 +867,51 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
                         print(f"[Pipeline] ERROR in set_time_span: {e}", flush=True)
                         import traceback
                         traceback.print_exc()
+                elif cmd == 'set_fps':
+                    try:
+                        new_fps = int(data.get('fps', 30))
+                        new_fps = max(1, min(60, new_fps))  # Clamp to 1-60
+                        
+                        old_fps = server.video_fps
+                        server.video_fps = new_fps
+                        
+                        # DON'T recalculate buffer - keep it based on 30fps so display stays full
+                        # Buffer stays the same, we just send slower
+                        
+                        print(f"[Pipeline] Send rate changing: {old_fps} -> {new_fps}fps (buffer unchanged at {server.suggested_buffer_height} rows)", flush=True)
+                        
+                        # Send acknowledgment only - no metadata update to avoid buffer resize
+                        await websocket.send(json.dumps({
+                            'type': 'fps_ack',
+                            'fps': new_fps,
+                        }))
+                        print(f"[Pipeline] FPS change complete!", flush=True)
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in set_fps: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                elif cmd == 'set_score_threshold':
+                    try:
+                        threshold = float(data.get('threshold', 0.5))
+                        threshold = max(0.0, min(1.0, threshold))  # Clamp to 0-1
+                        
+                        old_threshold = server.score_threshold
+                        server.score_threshold = threshold
+                        
+                        print(f"[Pipeline] Score threshold changing: {old_threshold:.2f} -> {threshold:.2f}", flush=True)
+                        
+                        # Send acknowledgment
+                        await websocket.send(json.dumps({
+                            'type': 'score_threshold_ack',
+                            'threshold': threshold,
+                        }))
+                        print(f"[Pipeline] Score threshold change complete!", flush=True)
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in set_score_threshold: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
     except Exception as e:
         logger.error(f"Video handler error: {e}")
     finally:
@@ -1008,3 +950,8 @@ if __name__ == "__main__":
     
     source.close()
     print("Done!")
+
+
+# Alias for backward compatibility with server.py
+# server.py imports UnifiedServer, but the class is actually VideoStreamServer
+UnifiedServer = VideoStreamServer
