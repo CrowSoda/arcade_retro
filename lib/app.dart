@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'core/config/theme.dart';
 import 'core/config/router.dart';
 import 'core/services/backend_launcher.dart';
+import 'features/settings/settings_screen.dart';
 
 class G20App extends ConsumerStatefulWidget {
   const G20App({super.key});
@@ -16,6 +18,8 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Load saved user preferences
+    _loadSavedSettings();
     // Auto-start the Python backend server on app launch
     _initializeBackend();
   }
@@ -43,6 +47,34 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
     // Start the backend server
     final launcher = ref.read(backendLauncherProvider.notifier);
     await launcher.startBackend();
+  }
+
+  /// Load saved user settings from SharedPreferences
+  Future<void> _loadSavedSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Load FFT size preference (default 65536 if not set)
+      final savedFftSize = prefs.getInt('waterfall_fft_size');
+      if (savedFftSize != null) {
+        // Validate it's a valid FFT size
+        const validSizes = [8192, 16384, 32768, 65536];
+        if (validSizes.contains(savedFftSize)) {
+          ref.read(waterfallFftSizeProvider.notifier).state = savedFftSize;
+          debugPrint('[App] Loaded saved FFT size: $savedFftSize');
+        }
+      }
+      
+      // Load score threshold preference (default 0.5 if not set)
+      final savedThreshold = prefs.getDouble('score_threshold');
+      if (savedThreshold != null) {
+        ref.read(scoreThresholdProvider.notifier).state = savedThreshold;
+        debugPrint('[App] Loaded saved score threshold: $savedThreshold');
+      }
+      
+    } catch (e) {
+      debugPrint('[App] Failed to load saved settings: $e');
+    }
   }
 
   @override

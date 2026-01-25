@@ -33,6 +33,12 @@ from datetime import datetime
 import torch
 import torch.nn.functional as F
 
+# Handle both module import (from server.py) and direct execution
+try:
+    from .gpu_fft import GPUSpectrogramProcessor, VALID_FFT_SIZES, DEFAULT_FFT_SIZE
+except ImportError:
+    from gpu_fft import GPUSpectrogramProcessor, VALID_FFT_SIZES, DEFAULT_FFT_SIZE
+
 def _cleanup():
     print("[Cleanup] Shutting down...", flush=True)
     print("[Cleanup] Done", flush=True)
@@ -252,11 +258,17 @@ class TripleBufferedPipeline:
         self.inference_dynamic_range = 80.0
         
         # =====================================================
-        # WATERFALL PARAMS - FOR DISPLAY ONLY (fast)
+        # WATERFALL PARAMS - GPU-ACCELERATED
         # =====================================================
-        self.waterfall_fft_size = 65536  # 8× better frequency resolution (305 Hz/bin)
-        self.waterfall_hop = 32768  # 50% overlap
+        self.waterfall_fft_size = DEFAULT_FFT_SIZE  # 65536 (305 Hz/bin)
+        self.waterfall_hop = self.waterfall_fft_size // 2  # 50% overlap
         self.waterfall_dynamic_range = 60.0  # Better contrast for display
+        
+        # GPU FFT Processor (replaces numpy FFT loop)
+        self.gpu_fft = GPUSpectrogramProcessor(
+            fft_size=self.waterfall_fft_size,
+            device='cuda' if torch.cuda.is_available() else 'cpu'
+        )
         
         # Noise floor tracking (exponential moving average)
         self.noise_floor_db = -60.0
@@ -384,40 +396,75 @@ class TripleBufferedPipeline:
             'stream_idx': stream_idx,
         }
     
+    # Target display rows per frame - decouples FFT resolution from display bandwidth
+    # ~20 rows gives smooth scrolling without overwhelming Flutter
+    TARGET_DISPLAY_ROWS = 20
+    
     def compute_waterfall_rows(self, iq_data: np.ndarray) -> np.ndarray:
         """
-        Compute STFT spectrogram - returns MULTIPLE rows, one per time slice.
-        Each row is a full FFT, preserving both time and frequency resolution.
+        GPU-accelerated batched FFT for waterfall display.
+        
+        Uses GPUSpectrogramProcessor for ~5-10x speedup over CPU numpy.
+        ALWAYS outputs ~20 rows regardless of FFT size (via max-pooling decimation).
+        
+        This decouples FFT resolution from display bandwidth:
+          - 8K FFT → 160 FFTs → decimated to 20 rows
+          - 16K FFT → 79 FFTs → decimated to 20 rows
+          - 32K FFT → 39 FFTs → decimated to 20 rows
+          - 64K FFT → 19 FFTs → kept as-is (already ≤20)
+        
+        Returns dB values: shape (~20, fft_size)
         """
-        fft_size = self.waterfall_fft_size  # 65536
-        hop_size = fft_size // 2  # 50% overlap = 32768
+        import torch
         
-        # Calculate number of complete FFTs we can do
-        num_ffts = (len(iq_data) - fft_size) // hop_size + 1
+        # GPU FFT (fast, 4-5ms regardless of FFT size)
+        db_rows = self.gpu_fft.process(iq_data)
         
-        if num_ffts < 1:
-            # Not enough data for even one FFT
-            return np.array([])
+        if len(db_rows) == 0:
+            return db_rows
         
-        # Pre-allocate output
-        rows = np.zeros((num_ffts, fft_size), dtype=np.float32)
+        # Decimate to fixed row count (keeps Flutter happy)
+        num_rows = db_rows.shape[0]
+        target_rows = self.TARGET_DISPLAY_ROWS
         
-        for i in range(num_ffts):
-            start = i * hop_size
-            segment = iq_data[start:start + fft_size]
+        if num_rows <= target_rows:
+            return db_rows  # Already small enough (64K FFT case)
+        
+        # Max-pooling decimation (preserves signal peaks)
+        pool_size = num_rows // target_rows
+        trim_to = pool_size * target_rows
+        trimmed = db_rows[:trim_to]
+        
+        # Reshape and take max along pool dimension
+        fft_size = trimmed.shape[1]
+        reshaped = trimmed.reshape(target_rows, pool_size, fft_size)
+        decimated = reshaped.max(axis=1)  # Max preserves signal peaks
+        
+        return decimated
+    
+    def update_waterfall_fft_size(self, new_size: int) -> dict:
+        """
+        Called when user changes FFT size via settings.
+        
+        IMPORTANT: Includes cuFFT warmup which may take 100-500ms.
+        Returns dict with success status and timing info.
+        """
+        result = self.gpu_fft.update_fft_size(new_size)
+        
+        if result['success']:
+            # Update our local tracking vars
+            self.waterfall_fft_size = new_size
+            self.waterfall_hop = new_size // 2
             
-            # Window
-            segment = segment * self.waterfall_window
-            
-            # FFT
-            fft_data = np.fft.fft(segment)
-            fft_data = np.fft.fftshift(fft_data)
-            
-            # Magnitude to dB
-            mag = np.abs(fft_data)
-            rows[i] = 20 * np.log10(mag + 1e-10)
+            # Note: waterfall_window is no longer used (GPU processor has its own)
+            logger.info(f"[Pipeline] Waterfall FFT size updated: {result['old_size']} -> {new_size} "
+                       f"(warmup: {result['warmup_ms']:.1f}ms)")
         
-        return rows  # Shape: (num_ffts, fft_size)
+        return result
+    
+    def get_fft_timing_stats(self) -> dict:
+        """Get FFT timing stats for performance monitoring."""
+        return self.gpu_fft.get_timing_stats()
     
     def compute_waterfall_row_rgba(self, iq_data: np.ndarray, target_width: int = 1024) -> tuple:
         """
@@ -516,15 +563,10 @@ class VideoStreamServer:
         # Reduced from 5s to 2.5s for better rendering performance (~30fps target)
         self.time_span_seconds = 2.5
         
-        # Calculate rows_per_frame from FFT settings
-        # At 20MHz sample rate, 33ms = 660,000 samples
-        # With FFT=32768, hop=16384: num_ffts = (660000 - 32768) / 16384 + 1 ≈ 38
-        sample_rate = 20e6
-        chunk_duration_ms = 33.0
-        samples_per_chunk = int(sample_rate * chunk_duration_ms / 1000)  # 660,000
-        fft_size = self.pipeline.waterfall_fft_size  # 32768
-        hop_size = fft_size // 2  # 16384
-        self.rows_per_frame = max(1, (samples_per_chunk - fft_size) // hop_size + 1)  # ~38
+        # Calculate rows_per_frame - FIXED at TARGET_DISPLAY_ROWS due to decimation
+        # The GPU FFT processor now always outputs ~20 rows regardless of FFT size
+        # (larger FFT outputs are max-pooled down to 20 rows)
+        self.rows_per_frame = self.pipeline.TARGET_DISPLAY_ROWS  # Always ~20
         
         # ROW-STRIP MODE: No large buffer needed! Just colormap for encoding strips
         # Flutter maintains its own pixel buffer
@@ -628,21 +670,29 @@ class VideoStreamServer:
                 # Dynamic FPS - read from self.video_fps each iteration
                 frame_interval = 1.0 / self.video_fps
                 
-                # Read IQ chunk
+                # === PERF TIMING: IQ Read ===
+                t0 = time.perf_counter()
                 chunk = self.iq_source.read_chunk(duration_ms=33)
+                t_iq_read = (time.perf_counter() - t0) * 1000
+                
                 if chunk is None:
                     await asyncio.sleep(0.01)
                     continue
                 
                 self.current_pts = chunk.pts
                 
-                # Compute FFT rows (multiple rows per chunk)
+                # === PERF TIMING: FFT/Waterfall ===
+                t0 = time.perf_counter()
                 db_rows = self.pipeline.compute_waterfall_rows(chunk.data)
+                t_fft = (time.perf_counter() - t0) * 1000
+                
                 self.rows_this_frame = len(db_rows)
                 
                 if self.rows_this_frame > 0:
-                    # Convert dB to RGBA pixels
+                    # === PERF TIMING: RGBA Conversion ===
+                    t0 = time.perf_counter()
                     rgba_strip = self._db_to_rgba(db_rows, target_width=self.video_width)
+                    t_rgba = (time.perf_counter() - t0) * 1000
                     
                     # Get the LAST row's dB values for PSD chart
                     last_row_db = db_rows[-1]  # Most recent row
@@ -670,15 +720,25 @@ class VideoStreamServer:
                         self.current_pts
                     )
                     
-                    # Send strip: MSG_STRIP + header + RGBA bytes + PSD bytes
+                    # === PERF TIMING: WebSocket Send ===
+                    t0 = time.perf_counter()
                     strip_bytes = rgba_strip.tobytes()
                     await websocket.send(bytes([self.MSG_STRIP]) + header + strip_bytes + psd_bytes)
+                    t_send = (time.perf_counter() - t0) * 1000
                     
                     # Update row counter AFTER sending
                     self.total_rows_written += self.rows_this_frame
                     
+                    # === PERF TIMING: Total frame time ===
+                    t_total = (time.perf_counter() - frame_start) * 1000
+                    
+                    # Print timing every 30 frames (with detailed GPU FFT breakdown)
                     if frame_count % 30 == 0:
-                        logger.info(f"[STRIP] Frame {frame_count}: {self.rows_this_frame} rows, {len(strip_bytes)} bytes, total_rows={self.total_rows_written}")
+                        fft_stats = self.pipeline.get_fft_timing_stats()
+                        print(f"[PERF-PY] Frame {frame_count}: iq={t_iq_read:.1f}ms "
+                              f"fft={t_fft:.1f}ms (prep={fft_stats['prep_ms']:.1f}+gpu={fft_stats['gpu_ms']:.1f}) "
+                              f"rgba={t_rgba:.1f}ms send={t_send:.1f}ms TOTAL={t_total:.1f}ms "
+                              f"(target={frame_interval*1000:.1f}ms) [FFT={fft_stats['fft_size']}]", flush=True)
                 
                 # Run inference every N frames
                 self.inference_buffer.append(chunk)
@@ -912,6 +972,79 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
                         print(f"[Pipeline] ERROR in set_score_threshold: {e}", flush=True)
                         import traceback
                         traceback.print_exc()
+                
+                elif cmd == 'set_fft_size':
+                    try:
+                        new_size = int(data.get('size', DEFAULT_FFT_SIZE))
+                        
+                        # Validate FFT size
+                        if new_size not in VALID_FFT_SIZES:
+                            print(f"[Pipeline] ERROR: Invalid FFT size {new_size}", flush=True)
+                            await websocket.send(json.dumps({
+                                'type': 'error',
+                                'command': 'set_fft_size',
+                                'message': f'Invalid FFT size: {new_size}. Valid: {list(VALID_FFT_SIZES.keys())}'
+                            }))
+                            continue
+                        
+                        old_size = server.pipeline.waterfall_fft_size
+                        print(f"[Pipeline] FFT size changing: {old_size} -> {new_size} (warmup in progress...)", flush=True)
+                        
+                        # Update FFT size (includes cuFFT warmup - may take 100-500ms!)
+                        result = server.pipeline.update_waterfall_fft_size(new_size)
+                        
+                        if result['success']:
+                            # rows_per_frame stays FIXED at TARGET_DISPLAY_ROWS (20)
+                            # because we always decimate to ~20 rows regardless of FFT size
+                            # This decouples FFT resolution from display bandwidth!
+                            server.rows_per_frame = server.pipeline.TARGET_DISPLAY_ROWS
+                            
+                            # Buffer height also stays consistent (always 20 rows/frame)
+                            server.suggested_buffer_height = int(server.time_span_seconds * server.video_fps * server.rows_per_frame)
+                            
+                            print(f"[Pipeline] FFT size changed: {old_size} -> {new_size} "
+                                  f"(rows_per_frame={server.rows_per_frame}, warmup={result['warmup_ms']:.1f}ms)", flush=True)
+                            
+                            # Send updated metadata to client
+                            metadata = {
+                                'type': 'metadata',
+                                'mode': 'row_strip',
+                                'strip_width': server.video_width,
+                                'rows_per_strip': server.rows_per_frame,
+                                'video_fps': server.video_fps,
+                                'suggested_buffer_height': server.suggested_buffer_height,
+                                'time_span_seconds': server.time_span_seconds,
+                                'encoder': 'rgba_raw',
+                                'fft_size': new_size,
+                            }
+                            await websocket.send(bytes([server.MSG_METADATA]) + json.dumps(metadata).encode())
+                            
+                            # Send acknowledgment with timing info
+                            await websocket.send(json.dumps({
+                                'type': 'fft_size_ack',
+                                'old_size': old_size,
+                                'new_size': new_size,
+                                'rows_per_frame': server.rows_per_frame,
+                                'warmup_ms': result['warmup_ms'],
+                                'description': VALID_FFT_SIZES[new_size],
+                            }))
+                            print(f"[Pipeline] FFT size change complete!", flush=True)
+                        else:
+                            await websocket.send(json.dumps({
+                                'type': 'error',
+                                'command': 'set_fft_size',
+                                'message': result.get('message', 'FFT size change failed')
+                            }))
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in set_fft_size: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        await websocket.send(json.dumps({
+                            'type': 'error',
+                            'command': 'set_fft_size',
+                            'message': str(e)
+                        }))
     except Exception as e:
         logger.error(f"Video handler error: {e}")
     finally:

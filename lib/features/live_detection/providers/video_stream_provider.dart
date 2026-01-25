@@ -326,6 +326,9 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
   /// Handle row strip - scroll buffer and paste new rows at bottom
   void _handleStrip(Uint8List data) {
+    // PERF TIMING: Measure strip handling time
+    final stopwatch = Stopwatch()..start();
+    
     // Parse binary header (16 bytes):
     // - frame_id: uint32 (4 bytes)
     // - total_rows: uint32 (4 bytes)
@@ -416,6 +419,12 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       detections: List.from(_detectionBuffer),
       psd: psdData,
     );
+    
+    // PERF TIMING: Print every 30 frames
+    stopwatch.stop();
+    if (state.frameCount % 30 == 0) {
+      debugPrint('[PERF] Strip handle: ${stopwatch.elapsedMilliseconds}ms (shift: ${shiftBytes ~/ 1024}KB)');
+    }
   }
 
   void _handleDetection(Uint8List jsonData) {
@@ -556,6 +565,37 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent score threshold command: ${(threshold * 100).toInt()}%');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
+  }
+
+  /// Set FFT size for waterfall processing
+  /// Valid sizes: 8192, 16384, 32768, 65536
+  /// NOTE: Backend will warmup cuFFT kernels (100-500ms delay)
+  void setFftSize(int size) {
+    debugPrint('[VideoStream] setFftSize: $size');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot set FFT size - not connected');
+      return;
+    }
+    
+    // Validate size
+    const validSizes = [8192, 16384, 32768, 65536];
+    if (!validSizes.contains(size)) {
+      debugPrint('[VideoStream] Invalid FFT size: $size. Valid: $validSizes');
+      return;
+    }
+    
+    final msg = json.encode({
+      'command': 'set_fft_size',
+      'size': size,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent FFT size command: $size (warmup may take 100-500ms)');
     } catch (e) {
       debugPrint('[VideoStream] Send FAILED: $e');
     }

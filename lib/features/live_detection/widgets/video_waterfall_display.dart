@@ -221,9 +221,16 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     if (state.frameCount != _lastFrameCount) {
       _lastFrameCount = state.frameCount;
       
+      // PERF TIMING: Measure image decode time
+      final stopwatch = Stopwatch()..start();
+      
       // DOUBLE-BUFFER: Create image async, don't block
       _createImageFromPixels(pixelBuffer, state.bufferWidth, state.bufferHeight)
           .then((newImage) {
+        stopwatch.stop();
+        // Print every frame to see decode latency
+        debugPrint('[PERF] Image decode: ${stopwatch.elapsedMilliseconds}ms (${state.bufferWidth}×${state.bufferHeight})');
+        
         if (newImage != null && mounted) {
           setState(() {
             // Dispose the OLD previous image (not the current one!)
@@ -238,11 +245,14 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     }
     
     // Always return current image (or placeholder)
+    // Wrap in RepaintBoundary to isolate repaints from rest of tree
     if (_waterfallImage != null) {
-      return RawImage(
-        image: _waterfallImage,
-        fit: BoxFit.fill,
-        filterQuality: FilterQuality.low,
+      return RepaintBoundary(
+        child: RawImage(
+          image: _waterfallImage,
+          fit: BoxFit.fill,
+          filterQuality: FilterQuality.low,
+        ),
       );
     }
     
