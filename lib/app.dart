@@ -5,6 +5,8 @@ import 'core/config/theme.dart';
 import 'core/config/router.dart';
 import 'core/services/backend_launcher.dart';
 import 'features/settings/settings_screen.dart';
+import 'features/config/providers/mission_provider.dart';
+import 'features/live_detection/providers/video_stream_provider.dart';
 
 class G20App extends ConsumerStatefulWidget {
   const G20App({super.key});

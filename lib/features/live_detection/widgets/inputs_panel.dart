@@ -2,14 +2,112 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:file_picker/file_picker.dart';
 import '../../../core/config/theme.dart';
-import '../../../core/database/signal_database.dart';
 import '../providers/waterfall_provider.dart';
 import '../providers/sdr_config_provider.dart';
 import '../providers/rx_state_provider.dart';
+import '../providers/scanner_provider.dart';
 import '../../config/providers/tuning_state_provider.dart';
+import '../../config/config_screen.dart' show missionsProvider, activeMissionProvider, Mission;
 import '../../settings/settings_screen.dart' show autoTuneDelayProvider;
+
+/// Fading toast overlay - disappears after duration
+class _FadingToast extends StatefulWidget {
+  final String message;
+  final IconData icon;
+  final Color color;
+  final Duration duration;
+  final VoidCallback onComplete;
+
+  const _FadingToast({
+    required this.message,
+    required this.icon,
+    required this.color,
+    this.duration = const Duration(seconds: 2),
+    required this.onComplete,
+  });
+
+  @override
+  State<_FadingToast> createState() => _FadingToastState();
+}
+
+class _FadingToastState extends State<_FadingToast> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    
+    // Fade in
+    _controller.forward();
+    
+    // Wait then fade out
+    Future.delayed(widget.duration - const Duration(milliseconds: 300), () {
+      if (mounted) {
+        _controller.reverse().then((_) => widget.onComplete());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: widget.color,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 8, offset: const Offset(0, 2))],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(widget.icon, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Text(widget.message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Show a fading toast overlay
+void showFadingToast(BuildContext context, String message, {IconData icon = Icons.check_circle, Color color = Colors.green}) {
+  final overlay = Overlay.of(context);
+  late OverlayEntry entry;
+  
+  entry = OverlayEntry(
+    builder: (context) => Positioned(
+      top: MediaQuery.of(context).size.height * 0.15,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          child: _FadingToast(
+            message: message,
+            icon: icon,
+            color: color.withOpacity(0.9),
+            onComplete: () => entry.remove(),
+          ),
+        ),
+      ),
+    ),
+  );
+  
+  overlay.insert(entry);
+}
 
 /// Show capture warning dialog - returns true if user confirms, false if cancelled
 Future<bool> showCaptureWarningDialog(BuildContext context, ManualCaptureState captureState) async {
@@ -195,8 +293,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
   @override
   Widget build(BuildContext context) {
     final sdrConfig = ref.watch(sdrConfigProvider);
-    final dbState = ref.watch(signalDatabaseProvider);
-    final activeMission = dbState.activeMissionConfig;
+    final activeMission = ref.watch(activeMissionProvider);  // Watch the actual active mission
     final tuningState = ref.watch(tuningStateProvider);
     final isManual = tuningState.mode == TuningMode.manual;
 
@@ -216,7 +313,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
           Row(
             children: [
               const Text(
-                'Config',
+                'Mission',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -270,16 +367,18 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                     ),
                   ),
                 ),
-                // Load Config button (icon only now)
-                SizedBox(
-                  width: 32,
-                  height: 24,
-                  child: IconButton(
-                    onPressed: () => _loadConfig(context, ref),
-                    icon: const Icon(Icons.folder_open, size: 14),
-                    padding: EdgeInsets.zero,
-                    color: G20Colors.primary,
-                    tooltip: 'Load Config',
+                // Load Mission button - touch-friendly (48x48)
+                Material(
+                  color: G20Colors.primary,
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _loadConfig(context, ref),
+                    child: const SizedBox(
+                      width: 48,
+                      height: 32,
+                      child: Icon(Icons.rocket_launch, size: 18, color: Colors.white),
+                    ),
                   ),
                 ),
               ],
@@ -397,19 +496,183 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
       ref.read(manualCaptureProvider.notifier).cancel();
     }
     
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['json', 'yaml', 'yml'],
-      dialogTitle: 'Load Mission Config',
-    );
+    // Show mission picker popup
+    final missions = ref.read(missionsProvider);
+    _showMissionPickerPopup(context, ref, missions);
+  }
 
-    if (result != null && result.files.single.path != null) {
-      ref.read(sdrConfigProvider.notifier).loadConfigFile(
-        result.files.single.path!,
-        result.files.single.name,
-      );
-      debugPrint('📄 Loaded config: ${result.files.single.name}');
-    }
+  void _showMissionPickerPopup(BuildContext context, WidgetRef ref, List<Mission> missions) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: G20Colors.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: 360,
+          constraints: const BoxConstraints(maxHeight: 450),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [G20Colors.primary, G20Colors.primary.withOpacity(0.7)],
+                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.rocket_launch, color: Colors.white, size: 24),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text('Load Mission', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Mission list
+              Flexible(
+                child: missions.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.inbox, size: 48, color: Colors.grey.shade600),
+                            const SizedBox(height: 12),
+                            const Text('No missions created', style: TextStyle(color: G20Colors.textSecondaryDark)),
+                            const SizedBox(height: 8),
+                            const Text('Go to Mission tab to create one', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11)),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.all(12),
+                        itemCount: missions.length,
+                        itemBuilder: (context, index) {
+                          final mission = missions[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Material(
+                              color: G20Colors.backgroundDark,
+                              borderRadius: BorderRadius.circular(10),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: () {
+                                  // Set mission as active
+                                  ref.read(activeMissionProvider.notifier).state = mission;
+                                  
+                                  // Load mission into scanner and start stepped scanning
+                                  final scanner = ref.read(scannerProvider.notifier);
+                                  scanner.loadMission(mission);
+                                  scanner.startScanning();
+                                  
+                                  // Get the first step's center frequency for display
+                                  final firstStep = ref.read(scannerProvider).currentStep;
+                                  final centerFreq = firstStep?.centerMHz ?? 
+                                      (mission.freqRanges.isNotEmpty 
+                                          ? mission.freqRanges.first.startMhz + mission.bandwidthMhz / 2
+                                          : ref.read(sdrConfigProvider).centerFreqMHz);
+                                  
+                                  Navigator.pop(ctx);
+                                  
+                                  // Show fading toast with step count
+                                  final stepCount = ref.read(scannerProvider).totalSteps;
+                                  showFadingToast(
+                                    context, 
+                                    'Mission "${mission.name}" - $stepCount steps', 
+                                    icon: Icons.rocket_launch, 
+                                    color: Colors.green.shade700,
+                                  );
+                                  
+                                  debugPrint('[Mission] Loaded: ${mission.name} with $stepCount steps');
+                                  
+                                  // Update freq text field
+                                  setState(() {
+                                    _freqController.text = centerFreq.toStringAsFixed(1);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: G20Colors.cardDark),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 40,
+                                        height: 40,
+                                        decoration: BoxDecoration(
+                                          color: G20Colors.primary.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.rocket_launch, color: G20Colors.primary, size: 20),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(mission.name, style: const TextStyle(color: G20Colors.textPrimaryDark, fontWeight: FontWeight.bold)),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${mission.freqRanges.length} ranges • ${mission.models.length} models • ${mission.bandwidthMhz.toInt()} MHz',
+                                              style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const Icon(Icons.arrow_forward_ios, color: G20Colors.textSecondaryDark, size: 14),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              
+              // Footer
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: G20Colors.cardDark.withOpacity(0.5),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () {
+                        ref.read(activeMissionProvider.notifier).state = null;
+                        Navigator.pop(ctx);
+                      },
+                      icon: const Icon(Icons.clear, size: 16),
+                      label: const Text('Clear'),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red.shade400),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -435,23 +698,23 @@ class _EditableField extends StatelessWidget {
         Text(label, style: const TextStyle(fontSize: 10, color: G20Colors.textSecondaryDark)),
         const SizedBox(height: 4),
         SizedBox(
-          height: 32,
+          height: 40,  // Touch-friendly height
           child: TextField(
             controller: controller,
-            style: const TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark),
+            style: const TextStyle(fontSize: 14, color: G20Colors.textPrimaryDark),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
             decoration: InputDecoration(
               filled: true,
               fillColor: G20Colors.cardDark,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(6),
                 borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(color: G20Colors.primary, width: 1),
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: G20Colors.primary, width: 2),
               ),
             ),
             onChanged: onChanged,
@@ -464,7 +727,7 @@ class _EditableField extends StatelessWidget {
   }
 }
 
-/// Bandwidth dropdown (NV100 supported values)
+/// Bandwidth dropdown (NV100 supported values) - touch-friendly
 class _BandwidthDropdown extends StatelessWidget {
   final double value;
   final Function(double) onChanged;
@@ -482,19 +745,19 @@ class _BandwidthDropdown extends StatelessWidget {
         const Text('BW (MHz)', style: TextStyle(fontSize: 10, color: G20Colors.textSecondaryDark)),
         const SizedBox(height: 4),
         SizedBox(
-          height: 32,
+          height: 40,  // Touch-friendly height
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: G20Colors.cardDark,
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(6),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<double>(
                 value: _bandwidths.contains(value) ? value : 20.0,
                 isExpanded: true,
                 dropdownColor: G20Colors.cardDark,
-                style: const TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark),
+                style: const TextStyle(fontSize: 14, color: G20Colors.textPrimaryDark),
                 items: _bandwidths.map((bw) => DropdownMenuItem(
                   value: bw,
                   child: Text('${bw.toInt()}'),
@@ -509,7 +772,7 @@ class _BandwidthDropdown extends StatelessWidget {
   }
 }
 
-/// Timeout selection button (compact)
+/// Timeout selection button - touch-friendly (minimum 40px height)
 class _TimeoutButton extends StatelessWidget {
   final String label;
   final bool isSelected;
@@ -524,25 +787,29 @@ class _TimeoutButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(
-            color: isSelected ? G20Colors.warning.withValues(alpha: 0.3) : G20Colors.cardDark,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(
-              color: isSelected ? G20Colors.warning : G20Colors.cardDark,
-              width: isSelected ? 2 : 1,
+      child: Material(
+        color: isSelected ? G20Colors.warning.withValues(alpha: 0.3) : G20Colors.cardDark,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: onTap,
+          child: Container(
+            height: 40,  // Touch-friendly minimum
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isSelected ? G20Colors.warning : Colors.transparent,
+                width: 2,
+              ),
             ),
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? G20Colors.warning : G20Colors.textSecondaryDark,
-                fontSize: 10,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? G20Colors.warning : G20Colors.textSecondaryDark,
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                ),
               ),
             ),
           ),

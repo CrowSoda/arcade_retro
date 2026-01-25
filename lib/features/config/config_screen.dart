@@ -1,393 +1,384 @@
+// lib/features/config/config_screen.dart
+/// Config screen - Create, edit, and manage missions
+/// 
+/// A Mission defines:
+/// - Frequency ranges to scan (e.g., 80-120 MHz, 1000-1200 MHz)
+/// - RX Bandwidth
+/// - Dwell time per frequency range
+/// - Models with priority order (drag-drop to set signal priority)
+
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import '../../core/config/theme.dart';
-import '../../core/utils/dtg_formatter.dart';
+import '../live_detection/widgets/inputs_panel.dart' show showFadingToast;
 
-/// Available models for config selection
-class ModelInfo {
-  final String id;
-  final String name;
-  final String path;
-  final double? f1Score;
-  final bool isSelected;
+// ============================================================================
+// DATA MODELS
+// ============================================================================
 
-  const ModelInfo({
-    required this.id,
-    required this.name,
-    required this.path,
-    this.f1Score,
-    this.isSelected = false,
-  });
+/// Frequency range to scan
+class FreqRange {
+  final double startMhz;
+  final double endMhz;
 
-  ModelInfo copyWith({bool? isSelected}) => ModelInfo(
-    id: id,
-    name: name,
-    path: path,
-    f1Score: f1Score,
-    isSelected: isSelected ?? this.isSelected,
+  const FreqRange({required this.startMhz, required this.endMhz});
+
+  String get label => '${startMhz.toInt()}-${endMhz.toInt()} MHz';
+  
+  FreqRange copyWith({double? startMhz, double? endMhz}) => FreqRange(
+    startMhz: startMhz ?? this.startMhz,
+    endMhz: endMhz ?? this.endMhz,
   );
 }
 
-/// Saved config info
-class SavedConfig {
+/// Model with priority for signal collection
+class ModelPriority {
+  final String id;
   final String name;
-  final String filename;
-  final int modelCount;
-  final DateTime createdAt;
+  final String filePath;
+  final String? signalType;
+  final int priority;
 
-  const SavedConfig({
+  const ModelPriority({
+    required this.id,
     required this.name,
-    required this.filename,
-    required this.modelCount,
-    required this.createdAt,
+    required this.filePath,
+    this.signalType,
+    required this.priority,
   });
+
+  ModelPriority copyWith({int? priority, String? signalType}) => ModelPriority(
+    id: id,
+    name: name,
+    filePath: filePath,
+    signalType: signalType ?? this.signalType,
+    priority: priority ?? this.priority,
+  );
 }
 
-/// Provider for available models
-final availableModelsProvider = StateProvider<List<ModelInfo>>((ref) {
-  return [
-    ModelInfo(id: '1', name: 'creamy_chicken', path: 'models/creamy_chicken_v3.trt', f1Score: 0.91),
-    ModelInfo(id: '2', name: 'lte_uplink', path: 'models/lte_uplink_v2.trt', f1Score: 0.87),
-    ModelInfo(id: '3', name: 'wifi_24', path: 'models/wifi_24_v1.trt', f1Score: 0.82),
-    ModelInfo(id: '4', name: 'bluetooth', path: 'models/bluetooth_v1.trt', f1Score: 0.79),
-  ];
+/// Complete mission configuration
+class Mission {
+  final String id;
+  final String name;
+  final String description;
+  final double bandwidthMhz;
+  final double dwellTimeSec;
+  final List<FreqRange> freqRanges;
+  final List<ModelPriority> models;
+  final DateTime created;
+  final DateTime modified;
+
+  const Mission({
+    required this.id,
+    required this.name,
+    this.description = '',
+    this.bandwidthMhz = 20.0,
+    this.dwellTimeSec = 5.0,
+    this.freqRanges = const [],
+    this.models = const [],
+    required this.created,
+    required this.modified,
+  });
+
+  Mission copyWith({
+    String? name,
+    String? description,
+    double? bandwidthMhz,
+    double? dwellTimeSec,
+    List<FreqRange>? freqRanges,
+    List<ModelPriority>? models,
+    DateTime? modified,
+  }) => Mission(
+    id: id,
+    name: name ?? this.name,
+    description: description ?? this.description,
+    bandwidthMhz: bandwidthMhz ?? this.bandwidthMhz,
+    dwellTimeSec: dwellTimeSec ?? this.dwellTimeSec,
+    freqRanges: freqRanges ?? this.freqRanges,
+    models: models ?? this.models,
+    created: created,
+    modified: modified ?? DateTime.now(),
+  );
+}
+
+// ============================================================================
+// PROVIDERS
+// ============================================================================
+
+/// Scans models/ folder and returns available models
+final availableModelsProvider = FutureProvider<List<ModelPriority>>((ref) async {
+  final modelsDir = Directory('models');
+  if (!await modelsDir.exists()) return [];
+  
+  final models = <ModelPriority>[];
+  final validExtensions = ['.pth', '.trt', '.onnx', '.pt', '.engine'];
+  
+  await for (final entity in modelsDir.list()) {
+    if (entity is File) {
+      final ext = p.extension(entity.path).toLowerCase();
+      if (validExtensions.contains(ext)) {
+        final name = p.basenameWithoutExtension(entity.path);
+        models.add(ModelPriority(
+          id: entity.path,
+          name: name,
+          filePath: entity.path,
+          signalType: null, // User links to signal type
+          priority: 0,
+        ));
+      }
+    }
+  }
+  
+  models.sort((a, b) => a.name.compareTo(b.name));
+  return models;
 });
 
-/// Provider for saved configs
-final savedConfigsProvider = StateProvider<List<SavedConfig>>((ref) {
-  return [
-    SavedConfig(name: 'alpha_strike', filename: 'config_alpha_strike_220001ZJAN26_2.json', modelCount: 2, createdAt: DateTime.now().subtract(const Duration(days: 1))),
-    SavedConfig(name: 'full_spectrum', filename: 'config_full_spectrum_211530ZJAN26_4.json', modelCount: 4, createdAt: DateTime.now().subtract(const Duration(days: 3))),
-  ];
+/// All saved missions - persisted to config/missions.json
+final missionsProvider = StateNotifierProvider<MissionsNotifier, List<Mission>>((ref) {
+  final notifier = MissionsNotifier();
+  return notifier;
 });
 
-/// Config screen - Generate mission configs from available models
-class ConfigScreen extends ConsumerStatefulWidget {
+class MissionsNotifier extends StateNotifier<List<Mission>> {
+  static const _filePath = 'config/missions.json';
+  
+  MissionsNotifier() : super(_loadFromDiskSync());  // Load synchronously at startup
+
+  void addMission(Mission mission) {
+    state = [...state, mission];
+    _saveToDisk();
+  }
+
+  void updateMission(Mission mission) {
+    state = state.map((m) => m.id == mission.id ? mission : m).toList();
+    _saveToDisk();
+  }
+
+  void deleteMission(String id) {
+    state = state.where((m) => m.id != id).toList();
+    _saveToDisk();
+  }
+  
+  /// Synchronously load from disk at startup so list is ready immediately
+  static List<Mission> _loadFromDiskSync() {
+    try {
+      final file = File(_filePath);
+      if (file.existsSync()) {
+        final jsonStr = file.readAsStringSync();
+        final List<dynamic> jsonList = json.decode(jsonStr);
+        final missions = jsonList.map((j) => _missionFromJsonStatic(j)).toList();
+        debugPrint('[Missions] Loaded ${missions.length} missions from disk (sync)');
+        return missions;
+      }
+    } catch (e) {
+      debugPrint('[Missions] Error loading from disk: $e');
+    }
+    return [];
+  }
+  
+  static Mission _missionFromJsonStatic(Map<String, dynamic> j) => Mission(
+    id: j['id'],
+    name: j['name'],
+    description: j['description'] ?? '',
+    bandwidthMhz: (j['bandwidthMhz'] as num).toDouble(),
+    dwellTimeSec: (j['dwellTimeSec'] as num).toDouble(),
+    freqRanges: (j['freqRanges'] as List).map((r) => FreqRange(startMhz: (r['startMhz'] as num).toDouble(), endMhz: (r['endMhz'] as num).toDouble())).toList(),
+    models: (j['models'] as List).map((p) => ModelPriority(id: p['id'], name: p['name'], filePath: p['filePath'], signalType: p['signalType'], priority: p['priority'])).toList(),
+    created: DateTime.parse(j['created']),
+    modified: DateTime.parse(j['modified']),
+  );
+  
+  Future<void> _saveToDisk() async {
+    try {
+      final dir = Directory('config');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final file = File(_filePath);
+      final jsonList = state.map((m) => _missionToJson(m)).toList();
+      await file.writeAsString(json.encode(jsonList));
+      debugPrint('[Missions] Saved ${state.length} missions to disk');
+    } catch (e) {
+      debugPrint('[Missions] Error saving to disk: $e');
+    }
+  }
+  
+  Map<String, dynamic> _missionToJson(Mission m) => {
+    'id': m.id,
+    'name': m.name,
+    'description': m.description,
+    'bandwidthMhz': m.bandwidthMhz,
+    'dwellTimeSec': m.dwellTimeSec,
+    'freqRanges': m.freqRanges.map((r) => {'startMhz': r.startMhz, 'endMhz': r.endMhz}).toList(),
+    'models': m.models.map((p) => {'id': p.id, 'name': p.name, 'filePath': p.filePath, 'signalType': p.signalType, 'priority': p.priority}).toList(),
+    'created': m.created.toIso8601String(),
+    'modified': m.modified.toIso8601String(),
+  };
+  
+  Mission _missionFromJson(Map<String, dynamic> j) => Mission(
+    id: j['id'],
+    name: j['name'],
+    description: j['description'] ?? '',
+    bandwidthMhz: (j['bandwidthMhz'] as num).toDouble(),
+    dwellTimeSec: (j['dwellTimeSec'] as num).toDouble(),
+    freqRanges: (j['freqRanges'] as List).map((r) => FreqRange(startMhz: (r['startMhz'] as num).toDouble(), endMhz: (r['endMhz'] as num).toDouble())).toList(),
+    models: (j['models'] as List).map((p) => ModelPriority(id: p['id'], name: p['name'], filePath: p['filePath'], signalType: p['signalType'], priority: p['priority'])).toList(),
+    created: DateTime.parse(j['created']),
+    modified: DateTime.parse(j['modified']),
+  );
+}
+
+/// Currently selected mission for editing
+final selectedMissionProvider = StateProvider<Mission?>((ref) => null);
+
+/// Currently ACTIVE mission (loaded for live operation)
+final activeMissionProvider = StateProvider<Mission?>((ref) => null);
+
+/// Sidekiq NV100 specs:
+/// - RF Tuning Range: 30 MHz to 6 GHz
+/// - Max Channel Bandwidth: 50 MHz
+/// - Sample Rates: Up to 61.44 Msamples/sec
+
+/// Common bandwidth options (MHz) - max 50 MHz per Sidekiq NV100
+const kBandwidthOptions = [5.0, 10.0, 20.0, 25.0, 40.0, 50.0];
+
+/// Common dwell time options (seconds)
+const kDwellTimeOptions = [1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0];
+
+/// RF tuning limits (MHz) - Sidekiq NV100
+const kMinFreqMhz = 30.0;
+const kMaxFreqMhz = 6000.0;
+
+// ============================================================================
+// CONFIG SCREEN
+// ============================================================================
+
+class ConfigScreen extends ConsumerWidget {
   const ConfigScreen({super.key});
 
   @override
-  ConsumerState<ConfigScreen> createState() => _ConfigScreenState();
-}
-
-class _ConfigScreenState extends ConsumerState<ConfigScreen> {
-  final _configNameController = TextEditingController();
-  Set<String> _selectedModelIds = {};
-
-  @override
-  void dispose() {
-    _configNameController.dispose();
-    super.dispose();
-  }
-
-  void _toggleModel(String id) {
-    setState(() {
-      if (_selectedModelIds.contains(id)) {
-        _selectedModelIds.remove(id);
-      } else {
-        _selectedModelIds.add(id);
-      }
-    });
-  }
-
-  void _generateConfig() {
-    final name = _configNameController.text.trim();
-    if (name.isEmpty) {
-      debugPrint('Please enter a config name');
-      return;
-    }
-    if (_selectedModelIds.isEmpty) {
-      debugPrint('Please select at least one model');
-      return;
-    }
-
-    final dtg = formatDTG(DateTime.now()).replaceAll(' ', '').replaceAll(':', '');
-    final filename = 'config_${name}_${dtg}_${_selectedModelIds.length}.json';
-
-    // Add to saved configs
-    final newConfig = SavedConfig(
-      name: name,
-      filename: filename,
-      modelCount: _selectedModelIds.length,
-      createdAt: DateTime.now(),
-    );
-
-    ref.read(savedConfigsProvider.notifier).update((state) => [...state, newConfig]);
-
-    // Clear form
-    _configNameController.clear();
-    setState(() => _selectedModelIds = {});
-
-    debugPrint('✅ Config "$filename" created!');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final models = ref.watch(availableModelsProvider);
-    final savedConfigs = ref.watch(savedConfigsProvider);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final missions = ref.watch(missionsProvider);
+    final selectedMission = ref.watch(selectedMissionProvider);
+    final availableModelsAsync = ref.watch(availableModelsProvider);
 
     return Scaffold(
       backgroundColor: G20Colors.backgroundDark,
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
-            Row(
-              children: [
-                const Icon(Icons.inventory_2, color: G20Colors.primary),
-                const SizedBox(width: 8),
-                const Text(
-                  'Mission Config Generator',
-                  style: TextStyle(
-                    color: G20Colors.textPrimaryDark,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // Main content
-            Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Left: Model selection
-                  Expanded(
-                    flex: 2,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: G20Colors.surfaceDark,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: G20Colors.cardDark),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Available Models',
-                            style: TextStyle(
-                              color: G20Colors.textPrimaryDark,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Expanded(
-                            child: ListView.builder(
-                              itemCount: models.length,
-                              itemBuilder: (context, index) {
-                                final model = models[index];
-                                final isSelected = _selectedModelIds.contains(model.id);
-                                return _ModelTile(
-                                  model: model,
-                                  isSelected: isSelected,
-                                  onTap: () => _toggleModel(model.id),
-                                );
-                              },
-                            ),
-                          ),
-                          const Divider(color: G20Colors.cardDark),
-                          const SizedBox(height: 8),
-                          // Config name input
-                          TextField(
-                            controller: _configNameController,
-                            style: const TextStyle(color: G20Colors.textPrimaryDark),
-                            decoration: InputDecoration(
-                              labelText: 'Config Name',
-                              labelStyle: const TextStyle(color: G20Colors.textSecondaryDark),
-                              hintText: 'e.g., alpha_strike',
-                              hintStyle: TextStyle(color: G20Colors.textSecondaryDark.withOpacity(0.5)),
-                              filled: true,
-                              fillColor: G20Colors.backgroundDark,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4),
-                                borderSide: const BorderSide(color: G20Colors.cardDark),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4),
-                                borderSide: const BorderSide(color: G20Colors.cardDark),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4),
-                                borderSide: const BorderSide(color: G20Colors.primary),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          // Generate button
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _generateConfig,
-                              icon: const Icon(Icons.save),
-                              label: Text('Generate Config (${_selectedModelIds.length} models)'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: G20Colors.primary,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  // Right column: Saved configs + Tuning controls
-                  Expanded(
-                    flex: 1,
-                    child: Column(
-                      children: [
-                        // Saved configs (top)
-                        Expanded(
-                          flex: 1,
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: G20Colors.surfaceDark,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: G20Colors.cardDark),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Saved Configs',
-                                  style: TextStyle(
-                                    color: G20Colors.textPrimaryDark,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Expanded(
-                                  child: savedConfigs.isEmpty
-                                      ? const Center(
-                                          child: Text(
-                                            'No configs saved yet',
-                                            style: TextStyle(color: G20Colors.textSecondaryDark),
-                                          ),
-                                        )
-                                      : ListView.builder(
-                                          itemCount: savedConfigs.length,
-                                          itemBuilder: (context, index) {
-                                            final config = savedConfigs[index];
-                                            return _SavedConfigTile(config: config);
-                                          },
-                                        ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+            // LEFT: Mission list
+            SizedBox(
+              width: 280,
+              child: _MissionListPanel(
+                missions: missions,
+                selectedId: selectedMission?.id,
+                onSelect: (m) => ref.read(selectedMissionProvider.notifier).state = m,
+                onNew: () => _showNewMissionDialog(context, ref),
+                onDelete: (id) => ref.read(missionsProvider.notifier).deleteMission(id),
               ),
+            ),
+            const SizedBox(width: 16),
+            
+            // RIGHT: Mission editor
+            Expanded(
+              child: selectedMission == null
+                  ? const _NoMissionSelected()
+                  : availableModelsAsync.when(
+                      data: (models) => _MissionEditor(
+                        mission: selectedMission,
+                        availableModels: models,
+                        onSave: (updated) {
+                          ref.read(missionsProvider.notifier).updateMission(updated);
+                          ref.read(selectedMissionProvider.notifier).state = updated;
+                        },
+                      ),
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Center(child: Text('Error loading models: $e')),
+                    ),
             ),
           ],
         ),
       ),
     );
   }
+
+  void _showNewMissionDialog(BuildContext context, WidgetRef ref) {
+    final nameController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New Mission'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Mission Name',
+            hintText: 'e.g., ISM Band Hunt',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final name = nameController.text.trim();
+              if (name.isNotEmpty) {
+                final now = DateTime.now();
+                final newMission = Mission(
+                  id: 'mission_${now.millisecondsSinceEpoch}',
+                  name: name,
+                  created: now,
+                  modified: now,
+                );
+                ref.read(missionsProvider.notifier).addMission(newMission);
+                ref.read(selectedMissionProvider.notifier).state = newMission;
+                Navigator.pop(ctx);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: G20Colors.primary),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _ModelTile extends StatelessWidget {
-  final ModelInfo model;
-  final bool isSelected;
-  final VoidCallback onTap;
+// ============================================================================
+// MISSION LIST PANEL
+// ============================================================================
 
-  const _ModelTile({
-    required this.model,
-    required this.isSelected,
-    required this.onTap,
+class _MissionListPanel extends StatelessWidget {
+  final List<Mission> missions;
+  final String? selectedId;
+  final ValueChanged<Mission> onSelect;
+  final VoidCallback onNew;
+  final ValueChanged<String> onDelete;
+
+  const _MissionListPanel({
+    required this.missions,
+    this.selectedId,
+    required this.onSelect,
+    required this.onNew,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? G20Colors.primary.withOpacity(0.2) : G20Colors.backgroundDark,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isSelected ? G20Colors.primary : G20Colors.cardDark,
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isSelected ? Icons.check_box : Icons.check_box_outline_blank,
-              color: isSelected ? G20Colors.primary : G20Colors.textSecondaryDark,
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    model.name,
-                    style: const TextStyle(
-                      color: G20Colors.textPrimaryDark,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Text(
-                    model.path,
-                    style: const TextStyle(
-                      color: G20Colors.textSecondaryDark,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (model.f1Score != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: G20Colors.success.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  'F1: ${model.f1Score!.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    color: G20Colors.success,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SavedConfigTile extends StatelessWidget {
-  final SavedConfig config;
-
-  const _SavedConfigTile({required this.config});
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: G20Colors.backgroundDark,
-        borderRadius: BorderRadius.circular(6),
+        color: G20Colors.surfaceDark,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: G20Colors.cardDark),
       ),
       child: Column(
@@ -395,30 +386,510 @@ class _SavedConfigTile extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.description, color: G20Colors.primary, size: 16),
+              const Icon(Icons.folder, color: G20Colors.primary, size: 20),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  config.name,
-                  style: const TextStyle(
-                    color: G20Colors.textPrimaryDark,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+              const Expanded(
+                child: Text('Missions', style: TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16, fontWeight: FontWeight.w600)),
               ),
+              IconButton(icon: const Icon(Icons.add, color: G20Colors.primary), tooltip: 'New Mission', onPressed: onNew),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            '${config.modelCount} models',
-            style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11),
-          ),
-          Text(
-            formatDTG(config.createdAt),
-            style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10),
+          const Divider(),
+          Expanded(
+            child: missions.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.inbox, size: 48, color: Colors.grey.shade700),
+                        const SizedBox(height: 8),
+                        Text('No missions yet', style: TextStyle(color: G20Colors.textSecondaryDark)),
+                        const SizedBox(height: 8),
+                        ElevatedButton.icon(onPressed: onNew, icon: const Icon(Icons.add, size: 16), label: const Text('Create Mission'), style: ElevatedButton.styleFrom(backgroundColor: G20Colors.primary)),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: missions.length,
+                    itemBuilder: (context, index) {
+                      final mission = missions[index];
+                      final isSelected = mission.id == selectedId;
+                      return ListTile(
+                        selected: isSelected,
+                        selectedTileColor: G20Colors.primary.withOpacity(0.15),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        leading: Icon(Icons.rocket_launch, color: isSelected ? G20Colors.primary : G20Colors.textSecondaryDark, size: 20),
+                        title: Text(mission.name, style: TextStyle(color: isSelected ? G20Colors.primary : G20Colors.textPrimaryDark, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                        subtitle: Text('${mission.freqRanges.length} ranges • ${mission.models.length} models', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11)),
+                        trailing: IconButton(icon: const Icon(Icons.delete_outline, size: 18), color: Colors.red.shade400, onPressed: () => onDelete(mission.id)),
+                        onTap: () => onSelect(mission),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
     );
+  }
+}
+
+// ============================================================================
+// NO MISSION SELECTED
+// ============================================================================
+
+class _NoMissionSelected extends StatelessWidget {
+  const _NoMissionSelected();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(color: G20Colors.surfaceDark, borderRadius: BorderRadius.circular(8), border: Border.all(color: G20Colors.cardDark)),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.touch_app, size: 64, color: Colors.grey.shade700),
+            const SizedBox(height: 16),
+            Text('Select a mission to edit', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 16)),
+            const SizedBox(height: 8),
+            Text('Or create a new mission from the left panel', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// MISSION EDITOR
+// ============================================================================
+
+class _MissionEditor extends ConsumerStatefulWidget {
+  final Mission mission;
+  final List<ModelPriority> availableModels;
+  final ValueChanged<Mission> onSave;
+
+  const _MissionEditor({required this.mission, required this.availableModels, required this.onSave});
+
+  @override
+  ConsumerState<_MissionEditor> createState() => _MissionEditorState();
+}
+
+class _MissionEditorState extends ConsumerState<_MissionEditor> {
+  late TextEditingController _nameController;
+  late TextEditingController _descController;
+  late double _bandwidth;
+  late double _dwellTime;
+  late List<FreqRange> _freqRanges;
+  late List<ModelPriority> _selectedModels;
+  int? _editingFreqIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFromMission();
+  }
+
+  @override
+  void didUpdateWidget(_MissionEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.mission.id != widget.mission.id) {
+      _initFromMission();
+    }
+  }
+
+  void _initFromMission() {
+    _nameController = TextEditingController(text: widget.mission.name);
+    _descController = TextEditingController(text: widget.mission.description);
+    _bandwidth = widget.mission.bandwidthMhz;
+    _dwellTime = widget.mission.dwellTimeSec;
+    _freqRanges = List.from(widget.mission.freqRanges);
+    _selectedModels = List.from(widget.mission.models);
+    _editingFreqIndex = null;
+  }
+
+  void _save() {
+    final updated = widget.mission.copyWith(
+      name: _nameController.text.trim(),
+      description: _descController.text.trim(),
+      bandwidthMhz: _bandwidth,
+      dwellTimeSec: _dwellTime,
+      freqRanges: _freqRanges,
+      models: _selectedModels,
+      modified: DateTime.now(),
+    );
+    widget.onSave(updated);
+    
+    // Show fading toast for save confirmation
+    showFadingToast(context, 'Mission "${updated.name}" saved', icon: Icons.save, color: Colors.green.shade700);
+    
+    debugPrint('[Mission] Saved: ${updated.name}');
+  }
+
+  /// Load mission and send configuration to backend
+  void _loadMission() {
+    // First save current edits
+    _save();
+    
+    // Build the updated mission
+    final updatedMission = widget.mission.copyWith(
+      name: _nameController.text.trim(),
+      description: _descController.text.trim(),
+      bandwidthMhz: _bandwidth,
+      dwellTimeSec: _dwellTime,
+      freqRanges: _freqRanges,
+      models: _selectedModels,
+    );
+    
+    // Set as active mission (other parts of app can watch this)
+    ref.read(activeMissionProvider.notifier).state = updatedMission;
+    
+    // Log mission config (backend integration is stubbed)
+    debugPrint('[Config] ════════════════════════════════════════');
+    debugPrint('[Config] LOADING MISSION: ${_nameController.text}');
+    debugPrint('[Config] ════════════════════════════════════════');
+    debugPrint('[Config] RX Bandwidth: $_bandwidth MHz');
+    debugPrint('[Config] Dwell Time: $_dwellTime sec');
+    debugPrint('[Config] Frequency Ranges: ${_freqRanges.length}');
+    for (final r in _freqRanges) {
+      debugPrint('[Config]   • ${r.startMhz.toInt()}-${r.endMhz.toInt()} MHz');
+    }
+    debugPrint('[Config] Models (priority order): ${_selectedModels.length}');
+    for (final m in _selectedModels) {
+      debugPrint('[Config]   ${m.priority + 1}. ${m.name} (${m.filePath})');
+    }
+    debugPrint('[Config] ════════════════════════════════════════');
+    
+    // TODO: When backend supports mission loading:
+    // final videoStream = ref.read(videoStreamProvider.notifier);
+    // videoStream.loadMission(updatedMission);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: G20Colors.surfaceDark, borderRadius: BorderRadius.circular(8), border: Border.all(color: G20Colors.cardDark)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              const Icon(Icons.edit, color: G20Colors.primary, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Edit: ${widget.mission.name}', style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16, fontWeight: FontWeight.w600))),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(onPressed: _save, icon: const Icon(Icons.save, size: 18), label: const Text('Save'), style: ElevatedButton.styleFrom(backgroundColor: G20Colors.primary)),
+            ],
+          ),
+          const Divider(),
+          
+          // Scrollable content
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name & Description
+                  Row(
+                    children: [
+                      Expanded(flex: 2, child: TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Mission Name'))),
+                      const SizedBox(width: 16),
+                      Expanded(flex: 3, child: TextField(controller: _descController, decoration: const InputDecoration(labelText: 'Description'))),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // BW & Dwell DROPDOWNS
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<double>(
+                          value: kBandwidthOptions.contains(_bandwidth) ? _bandwidth : kBandwidthOptions.first,
+                          decoration: const InputDecoration(labelText: 'RX Bandwidth', border: OutlineInputBorder()),
+                          items: kBandwidthOptions.map((bw) => DropdownMenuItem(value: bw, child: Text('$bw MHz'))).toList(),
+                          onChanged: (v) => setState(() => _bandwidth = v ?? _bandwidth),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: DropdownButtonFormField<double>(
+                          value: kDwellTimeOptions.contains(_dwellTime) ? _dwellTime : kDwellTimeOptions.first,
+                          decoration: const InputDecoration(labelText: 'Dwell Time', border: OutlineInputBorder()),
+                          items: kDwellTimeOptions.map((dt) => DropdownMenuItem(value: dt, child: Text('$dt sec'))).toList(),
+                          onChanged: (v) => setState(() => _dwellTime = v ?? _dwellTime),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Frequency Ranges TABLE
+                  _buildFreqRangesTable(),
+                  const SizedBox(height: 24),
+                  
+                  // Models with Priority (drag-drop)
+                  _buildModelsSection(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFreqRangesTable() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.radio, color: G20Colors.primary, size: 18),
+            const SizedBox(width: 8),
+            const Text('Frequency Ranges', style: TextStyle(color: G20Colors.textPrimaryDark, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            // Touch-friendly add button (48x48 minimum)
+            Material(
+              color: G20Colors.primary,
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() => _freqRanges.add(const FreqRange(startMhz: 0, endMhz: 0))),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, color: Colors.white, size: 20),
+                      SizedBox(width: 4),
+                      Text('Add', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: G20Colors.backgroundDark,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: G20Colors.cardDark),
+          ),
+          child: _freqRanges.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: Text('No ranges - click + to add', style: TextStyle(color: Colors.grey))),
+                )
+              : DataTable(
+                  columnSpacing: 24,
+                  headingRowColor: WidgetStateProperty.all(G20Colors.cardDark),
+                  columns: const [
+                    DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Start (MHz)', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('End (MHz)', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('', style: TextStyle(fontWeight: FontWeight.bold))),
+                  ],
+                  rows: _freqRanges.asMap().entries.map((e) {
+                    final idx = e.key;
+                    final range = e.value;
+                    final isEditing = _editingFreqIndex == idx;
+                    
+                    return DataRow(
+                      selected: isEditing,
+                      onSelectChanged: (_) => setState(() => _editingFreqIndex = isEditing ? null : idx),
+                      cells: [
+                        DataCell(Text('${idx + 1}')),
+                        DataCell(
+                          isEditing
+                              ? SizedBox(
+                                  width: 100,
+                                  child: TextFormField(
+                                    autofocus: true,
+                                    keyboardType: TextInputType.number,
+                                    initialValue: range.startMhz > 0 ? range.startMhz.toInt().toString() : '',
+                                    decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8), hintText: '30-6000'),
+                                    onChanged: (v) {
+                                      final val = double.tryParse(v);
+                                      if (val != null) {
+                                        _freqRanges[idx] = range.copyWith(startMhz: val);
+                                      }
+                                    },
+                                  ),
+                                )
+                              : Text('${range.startMhz.toInt()}'),
+                        ),
+                        DataCell(
+                          isEditing
+                              ? SizedBox(
+                                  width: 100,
+                                  child: TextFormField(
+                                    keyboardType: TextInputType.number,
+                                    initialValue: range.endMhz > 0 ? range.endMhz.toInt().toString() : '',
+                                    decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8), hintText: '30-6000'),
+                                    onChanged: (v) {
+                                      final val = double.tryParse(v);
+                                      if (val != null) {
+                                        _freqRanges[idx] = range.copyWith(endMhz: val);
+                                      }
+                                    },
+                                  ),
+                                )
+                              : Text('${range.endMhz.toInt()}'),
+                        ),
+                        DataCell(
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                            onPressed: () => setState(() => _freqRanges.removeAt(idx)),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModelsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.psychology, color: G20Colors.primary, size: 18),
+            const SizedBox(width: 8),
+            const Text('Signal Priority (Models)', style: TextStyle(color: G20Colors.textPrimaryDark, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            // Touch-friendly add button
+            Material(
+              color: G20Colors.primary,
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _addModel,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, color: Colors.white, size: 20),
+                      SizedBox(width: 4),
+                      Text('Add', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _selectedModels.isEmpty
+            ? Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: G20Colors.backgroundDark, borderRadius: BorderRadius.circular(6), border: Border.all(color: G20Colors.cardDark)),
+                child: const Center(child: Text('No models - click + to add from models/ folder', style: TextStyle(color: Colors.grey))),
+              )
+            : ReorderableListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _selectedModels.length,
+                onReorder: (oldIndex, newIndex) {
+                  setState(() {
+                    if (newIndex > oldIndex) newIndex--;
+                    final item = _selectedModels.removeAt(oldIndex);
+                    _selectedModels.insert(newIndex, item);
+                    for (int i = 0; i < _selectedModels.length; i++) {
+                      _selectedModels[i] = _selectedModels[i].copyWith(priority: i);
+                    }
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final model = _selectedModels[index];
+                  return ListTile(
+                    key: ValueKey(model.id),
+                    tileColor: G20Colors.primary.withOpacity(0.1),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    leading: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(color: G20Colors.primary, borderRadius: BorderRadius.circular(4)),
+                      child: Center(child: Text('${index + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    ),
+                    title: Text(model.name, style: const TextStyle(color: G20Colors.textPrimaryDark)),
+                    subtitle: Text(model.filePath, style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red), onPressed: () => setState(() => _selectedModels.removeAt(index))),
+                        const Icon(Icons.drag_handle, color: G20Colors.textSecondaryDark),
+                      ],
+                    ),
+                  );
+                },
+              ),
+      ],
+    );
+  }
+
+  void _addModel() {
+    final available = widget.availableModels.where((m) => !_selectedModels.any((s) => s.id == m.id)).toList();
+
+    if (available.isEmpty) {
+      // Show dialog instead of snackbar
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No Models Available'),
+          content: const Text('All models from models/ folder are already added.'),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Model from models/ folder'),
+        content: SizedBox(
+          width: 400,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: available.length,
+            itemBuilder: (context, index) {
+              final model = available[index];
+              return ListTile(
+                leading: const Icon(Icons.psychology),
+                title: Text(model.name),
+                subtitle: Text(model.filePath, style: const TextStyle(fontSize: 11)),
+                onTap: () {
+                  setState(() => _selectedModels.add(model.copyWith(priority: _selectedModels.length)));
+                  Navigator.pop(ctx);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel'))],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descController.dispose();
+    super.dispose();
   }
 }

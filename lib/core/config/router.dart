@@ -33,8 +33,8 @@ final routerProvider = Provider<GoRouter>((ref) {
             ),
           ),
           GoRoute(
-            path: '/config',
-            name: 'config',
+            path: '/mission',
+            name: 'mission',
             pageBuilder: (context, state) => const NoTransitionPage(
               child: ConfigScreen(),
             ),
@@ -63,7 +63,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 class AppRoutes {
   static const String live = '/live';
   static const String training = '/training';
-  static const String config = '/config';
+  static const String mission = '/mission';
   static const String database = '/database';
   static const String settings = '/settings';
 }

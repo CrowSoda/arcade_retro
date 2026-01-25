@@ -57,6 +57,85 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("unified_pipeline")
 
 BASE_DIR = Path(__file__).parent.parent
+
+
+# =============================================================================
+# WATERFALL SOURCE SELECTION - Priority: Manual > RX2 Recording > RX1 Recording > RX1 Scanning
+# =============================================================================
+
+class WaterfallSource:
+    """Which RX stream is feeding the waterfall display."""
+    RX1_SCANNING = 0   # Default: RX1 is scanning, no detection/recording
+    RX1_RECORDING = 1  # RX1 detected something and is recording
+    RX2_RECORDING = 2  # RX2 is collecting (RX1 handed off detection)
+    MANUAL = 3         # Manual collection on any RX
+
+
+class StreamSourceSelector:
+    """
+    Determines which IQ stream should feed the waterfall display.
+    
+    Priority (highest to lowest):
+    1. Manual collection (user explicitly recording)
+    2. RX2 recording (detector handed off to collector)
+    3. RX1 recording (single RX mode, detector is also collecting)
+    4. RX1 scanning (default: just hunting for signals)
+    
+    The waterfall always shows the "most important" stream:
+    - If anything is recording to disk, show that stream
+    - Otherwise, show the scanner stream
+    """
+    
+    def __init__(self):
+        self.current_source = WaterfallSource.RX1_SCANNING
+        self.rx1_recording = False
+        self.rx2_recording = False
+        self.manual_active = False
+        self._manual_rx = None  # Which RX is doing manual collection
+    
+    def update(self, rx1_recording: bool = None, rx2_recording: bool = None, 
+               manual_active: bool = None, manual_rx: int = None) -> int:
+        """
+        Update source state and return which source should feed the waterfall.
+        
+        Returns: WaterfallSource enum value (0-3)
+        """
+        if rx1_recording is not None:
+            self.rx1_recording = rx1_recording
+        if rx2_recording is not None:
+            self.rx2_recording = rx2_recording
+        if manual_active is not None:
+            self.manual_active = manual_active
+        if manual_rx is not None:
+            self._manual_rx = manual_rx
+        
+        # Priority selection
+        if self.manual_active:
+            self.current_source = WaterfallSource.MANUAL
+        elif self.rx2_recording:
+            self.current_source = WaterfallSource.RX2_RECORDING
+        elif self.rx1_recording:
+            self.current_source = WaterfallSource.RX1_RECORDING
+        else:
+            self.current_source = WaterfallSource.RX1_SCANNING
+        
+        return self.current_source
+    
+    @property
+    def is_recording(self) -> bool:
+        """True if any recording is active (not just scanning)."""
+        return self.current_source != WaterfallSource.RX1_SCANNING
+    
+    @property
+    def source_name(self) -> str:
+        """Human-readable name for current source."""
+        names = {
+            WaterfallSource.RX1_SCANNING: "RX1_SCANNING",
+            WaterfallSource.RX1_RECORDING: "RX1_RECORDING",
+            WaterfallSource.RX2_RECORDING: "RX2_RECORDING",
+            WaterfallSource.MANUAL: "MANUAL",
+        }
+        return names.get(self.current_source, "UNKNOWN")
 MODELS_DIR = BASE_DIR / "models"
 DATA_DIR = BASE_DIR / "data"
 
@@ -557,6 +636,9 @@ class VideoStreamServer:
         self.iq_source = UnifiedIQSource(iq_file)
         self.pipeline = TripleBufferedPipeline(model_path)
         
+        # Waterfall source selector - determines which RX stream feeds the display
+        self.source_selector = StreamSourceSelector()
+        
         # Strip parameters
         self.video_width = video_width
         self.video_fps = video_fps
@@ -706,18 +788,20 @@ class VideoStreamServer:
                     psd_bytes = psd_db.tobytes()
                     
                     # Pack strip message: header + raw RGBA bytes + PSD bytes
-                    # Header: 16 bytes
-                    #   - frame_id: uint32
-                    #   - total_rows: uint32 (monotonic counter)
-                    #   - rows_in_strip: uint16
-                    #   - strip_width: uint16
-                    #   - pts: float32
-                    header = struct.pack('<I I H H f',
+                    # Header: 17 bytes (was 16, added source_id)
+                    #   - frame_id: uint32 (4 bytes)
+                    #   - total_rows: uint32 (4 bytes, monotonic counter)
+                    #   - rows_in_strip: uint16 (2 bytes)
+                    #   - strip_width: uint16 (2 bytes)
+                    #   - pts: float32 (4 bytes)
+                    #   - source_id: uint8 (1 byte) - 0=SCAN, 1=RX1_REC, 2=RX2_REC, 3=MANUAL
+                    header = struct.pack('<I I H H f B',
                         frame_count,
                         self.total_rows_written,
                         self.rows_this_frame,
                         self.video_width,
-                        self.current_pts
+                        self.current_pts,
+                        self.source_selector.current_source,  # Waterfall source indicator
                     )
                     
                     # === PERF TIMING: WebSocket Send ===

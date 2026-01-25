@@ -1,103 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/theme.dart';
+import '../../core/database/signal_database.dart';
 
-/// Modulation types for dropdown
-const List<String> kModTypes = [
-  '--',
-  'BPSK',
-  'QPSK',
-  'OQPSK',
-  '8PSK',
-  '16QAM',
-  '64QAM',
-  'OFDM',
-  'FSK',
-  'GFSK',
-  'MSK',
-  'GMSK',
-  'FHSS',
-  'DSSS',
-  'AM',
-  'FM',
-  'Chirp',
-  'Burst',
-  'Unknown',
-];
-
-/// Signal entry for the database
-class SignalEntry {
-  final String id;
-  String name;
-  String modType;
-  double? modRate;
-  double? bandwidth;
-  String? notes;
-  int sampleCount;
-  double? f1Score;
-  int timesAbove90;
-
-  SignalEntry({
-    required this.id,
-    required this.name,
-    this.modType = '--',
-    this.modRate,
-    this.bandwidth,
-    this.notes,
-    this.sampleCount = 0,
-    this.f1Score,
-    this.timesAbove90 = 0,
-  });
-
-  SignalEntry copyWith({
-    String? name,
-    String? modType,
-    double? modRate,
-    double? bandwidth,
-    String? notes,
-    int? sampleCount,
-    double? f1Score,
-    int? timesAbove90,
-  }) {
-    return SignalEntry(
-      id: id,
-      name: name ?? this.name,
-      modType: modType ?? this.modType,
-      modRate: modRate ?? this.modRate,
-      bandwidth: bandwidth ?? this.bandwidth,
-      notes: notes ?? this.notes,
-      sampleCount: sampleCount ?? this.sampleCount,
-      f1Score: f1Score ?? this.f1Score,
-      timesAbove90: timesAbove90 ?? this.timesAbove90,
-    );
-  }
-}
-
-/// Provider for signal database entries
-final signalEntriesProvider = StateNotifierProvider<SignalEntriesNotifier, List<SignalEntry>>((ref) {
-  return SignalEntriesNotifier();
-});
-
-class SignalEntriesNotifier extends StateNotifier<List<SignalEntry>> {
-  SignalEntriesNotifier() : super([
-    SignalEntry(id: '1', name: 'creamy_chicken', modType: '--', sampleCount: 127, f1Score: 0.91, timesAbove90: 47),
-    SignalEntry(id: '2', name: 'lte_uplink', modType: 'OFDM', modRate: 15000, bandwidth: 10000, sampleCount: 89, f1Score: 0.87, timesAbove90: 23),
-    SignalEntry(id: '3', name: 'wifi_24', modType: 'OFDM', modRate: 20000, bandwidth: 20000, sampleCount: 156, f1Score: 0.82, timesAbove90: 56),
-    SignalEntry(id: '4', name: 'bluetooth', modType: 'GFSK', modRate: 1000000, bandwidth: 1000, sampleCount: 78, f1Score: 0.79, timesAbove90: 18),
-    SignalEntry(id: '5', name: 'unk_220001ZJAN26_825', modType: '--', sampleCount: 34, timesAbove90: 8),
-  ]);
-
-  void updateEntry(String id, SignalEntry updated) {
-    state = [
-      for (final entry in state)
-        entry.id == id ? updated : entry,
-    ];
-  }
-
-  void deleteEntry(String id) {
-    state = state.where((e) => e.id != id).toList();
-  }
-}
+// Re-export for backwards compatibility
+export '../../core/database/signal_database.dart' show SignalEntry, kModTypes, signalDatabaseProvider;
 
 /// Database screen - View and edit signal metadata
 class DatabaseScreen extends ConsumerStatefulWidget {
@@ -118,7 +25,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> {
       builder: (context) => _EditSignalDialog(
         entry: entry,
         onSave: (updated) {
-          ref.read(signalEntriesProvider.notifier).updateEntry(entry.id, updated);
+          ref.read(signalDatabaseProvider.notifier).updateSignal(entry.id, updated);
           setState(() => _selectedEntry = null);
         },
         onCancel: () => setState(() => _selectedEntry = null),
@@ -128,7 +35,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final entries = ref.watch(signalEntriesProvider);
+    final entries = ref.watch(signalDatabaseProvider);
     final filteredEntries = _searchQuery.isEmpty
         ? entries
         : entries.where((e) => e.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();

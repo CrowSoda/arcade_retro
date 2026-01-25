@@ -20,6 +20,35 @@ class MessageType {
   static const int videoFrame = strip;
 }
 
+/// Waterfall source indicator - which RX stream feeds the display
+/// Values must match backend WaterfallSource enum in unified_pipeline.py
+enum WaterfallSource {
+  rx1Scanning,   // 0 - RX1 scanning, no detection/recording
+  rx1Recording,  // 1 - RX1 detected something and is recording
+  rx2Recording,  // 2 - RX2 is collecting (handoff from RX1)
+  manual,        // 3 - Manual collection on any RX
+}
+
+/// Extension to get display properties for WaterfallSource
+extension WaterfallSourceExtension on WaterfallSource {
+  /// Human-readable label for the source
+  String get label {
+    switch (this) {
+      case WaterfallSource.rx1Scanning:
+        return 'SCANNING';
+      case WaterfallSource.rx1Recording:
+        return 'RX1 REC';
+      case WaterfallSource.rx2Recording:
+        return 'RX2 REC';
+      case WaterfallSource.manual:
+        return 'MANUAL';
+    }
+  }
+  
+  /// Whether this source indicates active recording
+  bool get isRecording => this != WaterfallSource.rx1Scanning;
+}
+
 /// Metadata about the stream
 class StreamMetadata {
   final String mode;           // 'row_strip' or 'video'
@@ -143,6 +172,9 @@ class VideoStreamState {
   
   // PSD data for the line graph at bottom of screen
   final Float32List? psd;       // Raw dB values for PSD chart
+  
+  // Waterfall source indicator - which RX stream is feeding the display
+  final WaterfallSource waterfallSource;
 
   const VideoStreamState({
     this.isConnected = false,
@@ -159,7 +191,11 @@ class VideoStreamState {
     this.totalRowsReceived = 0,
     this.rowsPerStrip = 38,
     this.psd,
+    this.waterfallSource = WaterfallSource.rx1Scanning,
   });
+  
+  /// Whether the waterfall is showing a recording stream (not just scanning)
+  bool get isRecording => waterfallSource.isRecording;
 
   VideoStreamState copyWith({
     bool? isConnected,
@@ -176,6 +212,7 @@ class VideoStreamState {
     int? totalRowsReceived,
     int? rowsPerStrip,
     Float32List? psd,
+    WaterfallSource? waterfallSource,
   }) {
     return VideoStreamState(
       isConnected: isConnected ?? this.isConnected,
@@ -192,6 +229,7 @@ class VideoStreamState {
       totalRowsReceived: totalRowsReceived ?? this.totalRowsReceived,
       rowsPerStrip: rowsPerStrip ?? this.rowsPerStrip,
       psd: psd ?? this.psd,
+      waterfallSource: waterfallSource ?? this.waterfallSource,
     );
   }
   
@@ -241,18 +279,31 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     _pixelBuffer = Uint8List(width * height * _bytesPerPixel);
     
     // Initialize with viridis dark purple (68, 1, 84, 255)
-    for (int i = 0; i < _pixelBuffer!.length; i += _bytesPerPixel) {
-      _pixelBuffer![i] = 68;      // R
-      _pixelBuffer![i + 1] = 1;   // G
-      _pixelBuffer![i + 2] = 84;  // B
-      _pixelBuffer![i + 3] = 255; // A
-    }
+    _fillWithViridisBackground();
     
     state = state.copyWith(
       pixelBuffer: _pixelBuffer,
       bufferWidth: width,
       bufferHeight: height,
     );
+  }
+  
+  /// Clear pixel buffer to viridis dark purple background
+  /// Called when waterfall source changes to prevent mixing old/new data
+  void _clearPixelBuffer() {
+    if (_pixelBuffer == null) return;
+    _fillWithViridisBackground();
+  }
+  
+  /// Fill buffer with viridis dark purple (68, 1, 84, 255)
+  void _fillWithViridisBackground() {
+    if (_pixelBuffer == null) return;
+    for (int i = 0; i < _pixelBuffer!.length; i += _bytesPerPixel) {
+      _pixelBuffer![i] = 68;      // R
+      _pixelBuffer![i + 1] = 1;   // G
+      _pixelBuffer![i + 2] = 84;  // B
+      _pixelBuffer![i + 3] = 255; // A
+    }
   }
 
   Future<void> connect(String host, int port) async {
@@ -329,46 +380,58 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     // PERF TIMING: Measure strip handling time
     final stopwatch = Stopwatch()..start();
     
-    // Parse binary header (16 bytes):
+    // Parse binary header (17 bytes):
     // - frame_id: uint32 (4 bytes)
     // - total_rows: uint32 (4 bytes)
     // - rows_in_strip: uint16 (2 bytes)
     // - strip_width: uint16 (2 bytes)
     // - pts: float32 (4 bytes)
+    // - source_id: uint8 (1 byte) - 0=SCAN, 1=RX1_REC, 2=RX2_REC, 3=MANUAL
     
-    if (data.length < 16) {
+    if (data.length < 17) {
       debugPrint('[VideoStream] Strip too short: ${data.length} bytes');
       return;
     }
     
-    final header = ByteData.sublistView(data, 0, 16);
+    final header = ByteData.sublistView(data, 0, 17);
     // final frameId = header.getUint32(0, Endian.little);
     final totalRows = header.getUint32(4, Endian.little);
     final rowsInStrip = header.getUint16(8, Endian.little);
     final stripWidth = header.getUint16(10, Endian.little);
     final pts = header.getFloat32(12, Endian.little);
+    final sourceId = header.getUint8(16);  // Waterfall source indicator
+    
+    // Parse source ID to enum (clamp to valid range)
+    final newSource = WaterfallSource.values[sourceId.clamp(0, WaterfallSource.values.length - 1)];
+    
+    // Check if source changed - clear buffer to prevent mixing old/new data
+    if (newSource != state.waterfallSource && _pixelBuffer != null) {
+      debugPrint('[VideoStream] Source changed: ${state.waterfallSource.label} -> ${newSource.label}, clearing buffer');
+      _clearPixelBuffer();
+      _detectionBuffer.clear();
+    }
     
     // Extract RGBA pixel data
     final expectedRgbaBytes = rowsInStrip * stripWidth * _bytesPerPixel;
     
-    if (data.length < 16 + expectedRgbaBytes) {
-      debugPrint('[VideoStream] Strip pixel data too short: ${data.length} < ${16 + expectedRgbaBytes}');
+    if (data.length < 17 + expectedRgbaBytes) {
+      debugPrint('[VideoStream] Strip pixel data too short: ${data.length} < ${17 + expectedRgbaBytes}');
       return;
     }
     
-    final pixelData = data.sublist(16, 16 + expectedRgbaBytes);
+    final pixelData = data.sublist(17, 17 + expectedRgbaBytes);
     
     // Extract PSD dB values (Float32, after RGBA data)
-    final psdStart = 16 + expectedRgbaBytes;
+    // NOTE: Must copy to aligned buffer since 17-byte header breaks 4-byte alignment
+    final psdStart = 17 + expectedRgbaBytes;
     final expectedPsdBytes = stripWidth * 4;  // Float32 = 4 bytes per element
     Float32List? psdData;
     if (data.length >= psdStart + expectedPsdBytes) {
-      // Create view of Float32 data
-      psdData = Float32List.view(
-        data.buffer, 
-        data.offsetInBytes + psdStart, 
-        stripWidth
-      );
+      // Copy to aligned buffer (can't use view due to 17-byte header alignment issue)
+      final psdBytes = data.sublist(psdStart, psdStart + expectedPsdBytes);
+      final alignedBuffer = Uint8List(expectedPsdBytes);
+      alignedBuffer.setAll(0, psdBytes);
+      psdData = Float32List.view(alignedBuffer.buffer);
     }
     
     // Initialize buffer if needed
@@ -408,7 +471,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     final cutoffRow = totalRows - _bufferHeight;
     _detectionBuffer = _detectionBuffer.where((d) => d.absoluteRow >= cutoffRow).toList();
     
-    // Update state with PSD data
+    // Update state with PSD data and waterfall source
     state = state.copyWith(
       pixelBuffer: _pixelBuffer,
       frameCount: state.frameCount + 1,
@@ -418,6 +481,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       currentPts: pts.toDouble(),
       detections: List.from(_detectionBuffer),
       psd: psdData,
+      waterfallSource: newSource,  // Update source indicator
     );
     
     // PERF TIMING: Print every 30 frames

@@ -1,65 +1,187 @@
+// lib/core/database/signal_database.dart
+/// Signal Database - Persistent storage for signal metadata
+/// 
+/// Each signal entry includes:
+/// - Name (signal class name)
+/// - Modulation type and rate
+/// - Data labels count (how many samples trained on)
+/// - F1 score from last training
+/// - Training history
+/// 
+/// Updated by training tab when models are trained
+
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Signal profile stored in database
-class SignalProfile {
-  final String id;
-  final String name;           // e.g., "creamy_chicken"
-  final String modType;        // FSK, PSK, AM, FM, etc.
-  final double? modRate;       // Modulation rate in Hz
-  final double freqMin;        // Min frequency in MHz
-  final double freqMax;        // Max frequency in MHz
-  final double? pri;           // Pulse Repetition Interval in ms
-  final double? pulseWidth;    // Pulse width in us
-  final String? modelPath;     // Path to trained model
-  final int detectionCount;    // Number of times detected
-  final double avgConfidence;  // Average detection confidence
-  final DateTime createdAt;
-  final DateTime updatedAt;
+/// Modulation types for dropdown
+const List<String> kModTypes = [
+  '--',
+  'BPSK',
+  'QPSK',
+  'OQPSK',
+  '8PSK',
+  '16QAM',
+  '64QAM',
+  'OFDM',
+  'FSK',
+  'GFSK',
+  'MSK',
+  'GMSK',
+  'FHSS',
+  'DSSS',
+  'AM',
+  'FM',
+  'Chirp',
+  'Burst',
+  'Unknown',
+];
 
-  SignalProfile({
+/// Training result from a single training run
+class TrainingResult {
+  final DateTime timestamp;
+  final int dataLabels;      // Number of labeled samples used
+  final double f1Score;      // F1 score achieved
+  final double precision;    // Precision metric
+  final double recall;       // Recall metric
+  final int epochs;          // Training epochs
+  final double? loss;        // Final loss value
+  final String? modelPath;   // Path to saved model file
+
+  const TrainingResult({
+    required this.timestamp,
+    required this.dataLabels,
+    required this.f1Score,
+    this.precision = 0.0,
+    this.recall = 0.0,
+    this.epochs = 0,
+    this.loss,
+    this.modelPath,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'timestamp': timestamp.toIso8601String(),
+    'dataLabels': dataLabels,
+    'f1Score': f1Score,
+    'precision': precision,
+    'recall': recall,
+    'epochs': epochs,
+    'loss': loss,
+    'modelPath': modelPath,
+  };
+
+  factory TrainingResult.fromJson(Map<String, dynamic> json) => TrainingResult(
+    timestamp: DateTime.parse(json['timestamp']),
+    dataLabels: json['dataLabels'] ?? 0,
+    f1Score: (json['f1Score'] as num?)?.toDouble() ?? 0.0,
+    precision: (json['precision'] as num?)?.toDouble() ?? 0.0,
+    recall: (json['recall'] as num?)?.toDouble() ?? 0.0,
+    epochs: json['epochs'] ?? 0,
+    loss: (json['loss'] as num?)?.toDouble(),
+    modelPath: json['modelPath'],
+  );
+}
+
+/// Signal entry for the database
+class SignalEntry {
+  final String id;
+  String name;
+  String modType;
+  double? modRate;        // Symbol rate in sps
+  double? bandwidth;      // Signal bandwidth in kHz
+  String? notes;
+  
+  // Training stats
+  int totalDataLabels;    // Total labeled samples across all training
+  double? f1Score;        // Best/latest F1 score
+  double? precision;      // Best/latest precision
+  double? recall;         // Best/latest recall
+  int timesAbove90;       // Detection count with >90% confidence
+  
+  // Training history
+  List<TrainingResult> trainingHistory;
+  
+  // Timestamps
+  DateTime created;
+  DateTime modified;
+
+  SignalEntry({
     required this.id,
     required this.name,
-    required this.modType,
+    this.modType = '--',
     this.modRate,
-    required this.freqMin,
-    required this.freqMax,
-    this.pri,
-    this.pulseWidth,
-    this.modelPath,
-    this.detectionCount = 0,
-    this.avgConfidence = 0.0,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-  })  : createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+    this.bandwidth,
+    this.notes,
+    this.totalDataLabels = 0,
+    this.f1Score,
+    this.precision,
+    this.recall,
+    this.timesAbove90 = 0,
+    List<TrainingResult>? trainingHistory,
+    DateTime? created,
+    DateTime? modified,
+  }) : trainingHistory = trainingHistory ?? [],
+       created = created ?? DateTime.now(),
+       modified = modified ?? DateTime.now();
 
-  SignalProfile copyWith({
+  /// Backwards-compatible getter for totalDataLabels
+  int get sampleCount => totalDataLabels;
+
+  /// Get the latest training result
+  TrainingResult? get latestTraining => 
+      trainingHistory.isNotEmpty ? trainingHistory.last : null;
+
+  /// Get best F1 score from history
+  double? get bestF1Score {
+    if (trainingHistory.isEmpty) return f1Score;
+    return trainingHistory.map((t) => t.f1Score).reduce((a, b) => a > b ? a : b);
+  }
+
+  /// Add a new training result
+  void addTrainingResult(TrainingResult result) {
+    trainingHistory.add(result);
+    totalDataLabels += result.dataLabels;
+    f1Score = result.f1Score;
+    precision = result.precision;
+    recall = result.recall;
+    modified = DateTime.now();
+  }
+
+  /// Increment detection count (for >90% confidence detections)
+  void incrementDetectionCount() {
+    timesAbove90++;
+    modified = DateTime.now();
+  }
+
+  SignalEntry copyWith({
     String? name,
     String? modType,
     double? modRate,
-    double? freqMin,
-    double? freqMax,
-    double? pri,
-    double? pulseWidth,
-    String? modelPath,
-    int? detectionCount,
-    double? avgConfidence,
+    double? bandwidth,
+    String? notes,
+    int? totalDataLabels,
+    double? f1Score,
+    double? precision,
+    double? recall,
+    int? timesAbove90,
+    List<TrainingResult>? trainingHistory,
   }) {
-    return SignalProfile(
+    return SignalEntry(
       id: id,
       name: name ?? this.name,
       modType: modType ?? this.modType,
       modRate: modRate ?? this.modRate,
-      freqMin: freqMin ?? this.freqMin,
-      freqMax: freqMax ?? this.freqMax,
-      pri: pri ?? this.pri,
-      pulseWidth: pulseWidth ?? this.pulseWidth,
-      modelPath: modelPath ?? this.modelPath,
-      detectionCount: detectionCount ?? this.detectionCount,
-      avgConfidence: avgConfidence ?? this.avgConfidence,
-      createdAt: createdAt,
-      updatedAt: DateTime.now(),
+      bandwidth: bandwidth ?? this.bandwidth,
+      notes: notes ?? this.notes,
+      totalDataLabels: totalDataLabels ?? this.totalDataLabels,
+      f1Score: f1Score ?? this.f1Score,
+      precision: precision ?? this.precision,
+      recall: recall ?? this.recall,
+      timesAbove90: timesAbove90 ?? this.timesAbove90,
+      trainingHistory: trainingHistory ?? this.trainingHistory,
+      created: created,
+      modified: DateTime.now(),
     );
   }
 
@@ -68,312 +190,226 @@ class SignalProfile {
     'name': name,
     'modType': modType,
     'modRate': modRate,
-    'freqMin': freqMin,
-    'freqMax': freqMax,
-    'pri': pri,
-    'pulseWidth': pulseWidth,
-    'modelPath': modelPath,
-    'detectionCount': detectionCount,
-    'avgConfidence': avgConfidence,
-    'createdAt': createdAt.toIso8601String(),
-    'updatedAt': updatedAt.toIso8601String(),
-  };
-
-  factory SignalProfile.fromJson(Map<String, dynamic> json) => SignalProfile(
-    id: json['id'],
-    name: json['name'],
-    modType: json['modType'],
-    modRate: json['modRate']?.toDouble(),
-    freqMin: json['freqMin'].toDouble(),
-    freqMax: json['freqMax'].toDouble(),
-    pri: json['pri']?.toDouble(),
-    pulseWidth: json['pulseWidth']?.toDouble(),
-    modelPath: json['modelPath'],
-    detectionCount: json['detectionCount'] ?? 0,
-    avgConfidence: json['avgConfidence']?.toDouble() ?? 0.0,
-    createdAt: DateTime.parse(json['createdAt']),
-    updatedAt: DateTime.parse(json['updatedAt']),
-  );
-}
-
-/// Detection record with MGRS location
-class DetectionRecord {
-  final String id;
-  final String signalProfileId;
-  final DateTime timestamp;
-  final String mgrsLocation;     // MGRS grid reference (e.g., "17TLJ8834916401")
-  final double latitude;
-  final double longitude;
-  final double freqCenter;       // Detected center frequency MHz
-  final double bandwidth;        // Detected bandwidth MHz
-  final double confidence;
-  final double snr;              // Signal-to-noise ratio dB
-  final String? iqFilePath;      // Path to captured IQ data
-  final bool addedToTraining;    // Whether used for model training
-
-  DetectionRecord({
-    required this.id,
-    required this.signalProfileId,
-    required this.timestamp,
-    required this.mgrsLocation,
-    required this.latitude,
-    required this.longitude,
-    required this.freqCenter,
-    required this.bandwidth,
-    required this.confidence,
-    this.snr = 0.0,
-    this.iqFilePath,
-    this.addedToTraining = false,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'signalProfileId': signalProfileId,
-    'timestamp': timestamp.toIso8601String(),
-    'mgrsLocation': mgrsLocation,
-    'latitude': latitude,
-    'longitude': longitude,
-    'freqCenter': freqCenter,
     'bandwidth': bandwidth,
-    'confidence': confidence,
-    'snr': snr,
-    'iqFilePath': iqFilePath,
-    'addedToTraining': addedToTraining,
+    'notes': notes,
+    'totalDataLabels': totalDataLabels,
+    'f1Score': f1Score,
+    'precision': precision,
+    'recall': recall,
+    'timesAbove90': timesAbove90,
+    'trainingHistory': trainingHistory.map((t) => t.toJson()).toList(),
+    'created': created.toIso8601String(),
+    'modified': modified.toIso8601String(),
   };
 
-  factory DetectionRecord.fromJson(Map<String, dynamic> json) => DetectionRecord(
-    id: json['id'],
-    signalProfileId: json['signalProfileId'],
-    timestamp: DateTime.parse(json['timestamp']),
-    mgrsLocation: json['mgrsLocation'],
-    latitude: json['latitude'].toDouble(),
-    longitude: json['longitude'].toDouble(),
-    freqCenter: json['freqCenter'].toDouble(),
-    bandwidth: json['bandwidth'].toDouble(),
-    confidence: json['confidence'].toDouble(),
-    snr: json['snr']?.toDouble() ?? 0.0,
-    iqFilePath: json['iqFilePath'],
-    addedToTraining: json['addedToTraining'] ?? false,
-  );
-}
-
-/// Mission config - snapshot of signals to detect
-class MissionConfig {
-  final String id;
-  final String name;
-  final List<String> signalProfileIds;
-  final double minConfidenceThreshold;
-  final DateTime createdAt;
-
-  MissionConfig({
-    required this.id,
-    required this.name,
-    required this.signalProfileIds,
-    this.minConfidenceThreshold = 0.7,
-    DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'signalProfileIds': signalProfileIds,
-    'minConfidenceThreshold': minConfidenceThreshold,
-    'createdAt': createdAt.toIso8601String(),
-  };
-
-  factory MissionConfig.fromJson(Map<String, dynamic> json) => MissionConfig(
+  factory SignalEntry.fromJson(Map<String, dynamic> json) => SignalEntry(
     id: json['id'],
     name: json['name'],
-    signalProfileIds: List<String>.from(json['signalProfileIds']),
-    minConfidenceThreshold: json['minConfidenceThreshold']?.toDouble() ?? 0.7,
-    createdAt: DateTime.parse(json['createdAt']),
+    modType: json['modType'] ?? '--',
+    modRate: (json['modRate'] as num?)?.toDouble(),
+    bandwidth: (json['bandwidth'] as num?)?.toDouble(),
+    notes: json['notes'],
+    totalDataLabels: json['totalDataLabels'] ?? json['sampleCount'] ?? 0,
+    f1Score: (json['f1Score'] as num?)?.toDouble(),
+    precision: (json['precision'] as num?)?.toDouble(),
+    recall: (json['recall'] as num?)?.toDouble(),
+    timesAbove90: json['timesAbove90'] ?? 0,
+    trainingHistory: (json['trainingHistory'] as List<dynamic>?)
+        ?.map((t) => TrainingResult.fromJson(t))
+        .toList() ?? [],
+    created: json['created'] != null ? DateTime.parse(json['created']) : DateTime.now(),
+    modified: json['modified'] != null ? DateTime.parse(json['modified']) : DateTime.now(),
   );
-
-  String toConfigFile() => const JsonEncoder.withIndent('  ').convert(toJson());
 }
 
-/// Signal Database - manages all signal profiles and detections
-class SignalDatabaseNotifier extends StateNotifier<SignalDatabaseState> {
-  SignalDatabaseNotifier() : super(SignalDatabaseState.initial()) {
-    _loadMockData();
-  }
+/// Signal Database Notifier - persists to config/signals.json
+class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
+  static const _filePath = 'config/signals.json';
+  
+  SignalDatabaseNotifier() : super(_loadFromDiskSync());
 
-  void _loadMockData() {
-    // Add some mock signal profiles
-    final mockProfiles = [
-      SignalProfile(
-        id: 'sig_001',
-        name: 'Alpha-1',
-        modType: 'FSK',
-        modRate: 9600,
-        freqMin: 905.0,
-        freqMax: 910.0,
-        detectionCount: 47,
-        avgConfidence: 0.92,
-        modelPath: '/models/alpha1.trt',
-      ),
-      SignalProfile(
-        id: 'sig_002',
-        name: 'Bravo-2',
-        modType: 'PSK',
-        modRate: 19200,
-        freqMin: 912.0,
-        freqMax: 918.0,
-        pri: 5.0,
-        detectionCount: 23,
-        avgConfidence: 0.87,
-        modelPath: '/models/bravo2.trt',
-      ),
-      SignalProfile(
-        id: 'sig_003',
-        name: 'Charlie-3',
-        modType: 'AM',
-        freqMin: 920.0,
-        freqMax: 925.0,
-        detectionCount: 12,
-        avgConfidence: 0.78,
-        modelPath: '/models/charlie3.trt',
-      ),
-    ];
-
-    // Mock MGRS locations (simulated positions)
-    final mockDetections = [
-      DetectionRecord(
-        id: 'det_001',
-        signalProfileId: 'sig_001',
-        timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
-        mgrsLocation: '17TLJ8834916401',
-        latitude: 38.8977,
-        longitude: -77.0365,
-        freqCenter: 907.5,
-        bandwidth: 2.0,
-        confidence: 0.94,
-        snr: 18.5,
-      ),
-      DetectionRecord(
-        id: 'det_002',
-        signalProfileId: 'sig_002',
-        timestamp: DateTime.now().subtract(const Duration(minutes: 3)),
-        mgrsLocation: '17TLJ8835016410',
-        latitude: 38.8980,
-        longitude: -77.0360,
-        freqCenter: 915.0,
-        bandwidth: 4.0,
-        confidence: 0.89,
-        snr: 15.2,
-      ),
-    ];
-
-    state = state.copyWith(
-      profiles: Map.fromEntries(mockProfiles.map((p) => MapEntry(p.id, p))),
-      detections: mockDetections,
-    );
-  }
-
-  /// Add or update a signal profile
-  void upsertProfile(SignalProfile profile) {
-    final updated = {...state.profiles};
-    updated[profile.id] = profile;
-    state = state.copyWith(profiles: updated);
-  }
-
-  /// Record a new detection
-  void addDetection(DetectionRecord detection) {
-    final detections = [...state.detections, detection];
-    
-    // Update profile stats if high confidence
-    if (detection.confidence >= 0.7 && state.profiles.containsKey(detection.signalProfileId)) {
-      final profile = state.profiles[detection.signalProfileId]!;
-      final newCount = profile.detectionCount + 1;
-      final newAvg = ((profile.avgConfidence * profile.detectionCount) + detection.confidence) / newCount;
-      
-      upsertProfile(profile.copyWith(
-        detectionCount: newCount,
-        avgConfidence: newAvg,
-      ));
+  /// Synchronously load from disk at startup
+  static List<SignalEntry> _loadFromDiskSync() {
+    try {
+      final file = File(_filePath);
+      if (file.existsSync()) {
+        final jsonStr = file.readAsStringSync();
+        final List<dynamic> jsonList = json.decode(jsonStr);
+        final entries = jsonList.map((j) => SignalEntry.fromJson(j)).toList();
+        debugPrint('[SignalDB] Loaded ${entries.length} signals from disk');
+        return entries;
+      }
+    } catch (e) {
+      debugPrint('[SignalDB] Error loading from disk: $e');
     }
     
-    state = state.copyWith(detections: detections);
+    // Return default entries if no file exists
+    return [
+      SignalEntry(
+        id: '1', 
+        name: 'creamy_chicken', 
+        modType: '--', 
+        totalDataLabels: 127, 
+        f1Score: 0.91, 
+        timesAbove90: 47,
+      ),
+      SignalEntry(
+        id: '2', 
+        name: 'lte_uplink', 
+        modType: 'OFDM', 
+        modRate: 15000, 
+        bandwidth: 10000, 
+        totalDataLabels: 89, 
+        f1Score: 0.87, 
+        timesAbove90: 23,
+      ),
+      SignalEntry(
+        id: '3', 
+        name: 'wifi_24', 
+        modType: 'OFDM', 
+        modRate: 20000, 
+        bandwidth: 20000, 
+        totalDataLabels: 156, 
+        f1Score: 0.82, 
+        timesAbove90: 56,
+      ),
+      SignalEntry(
+        id: '4', 
+        name: 'bluetooth', 
+        modType: 'GFSK', 
+        modRate: 1000000, 
+        bandwidth: 1000, 
+        totalDataLabels: 78, 
+        f1Score: 0.79, 
+        timesAbove90: 18,
+      ),
+      SignalEntry(
+        id: '5', 
+        name: 'unk_220001ZJAN26_825', 
+        modType: '--', 
+        totalDataLabels: 34, 
+        timesAbove90: 8,
+      ),
+    ];
   }
 
-  /// Create a mission config from selected profiles
-  MissionConfig createMissionConfig(String name, List<String> profileIds, {double threshold = 0.7}) {
-    final config = MissionConfig(
-      id: 'mission_${DateTime.now().millisecondsSinceEpoch}',
-      name: name,
-      signalProfileIds: profileIds,
-      minConfidenceThreshold: threshold,
+  Future<void> _saveToDisk() async {
+    try {
+      final dir = Directory('config');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final file = File(_filePath);
+      final jsonList = state.map((e) => e.toJson()).toList();
+      await file.writeAsString(const JsonEncoder.withIndent('  ').convert(jsonList));
+      debugPrint('[SignalDB] Saved ${state.length} signals to disk');
+    } catch (e) {
+      debugPrint('[SignalDB] Error saving to disk: $e');
+    }
+  }
+
+  /// Get signal by name (case-insensitive)
+  SignalEntry? getByName(String name) {
+    final lower = name.toLowerCase();
+    try {
+      return state.firstWhere((e) => e.name.toLowerCase() == lower);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Get signal by ID
+  SignalEntry? getById(String id) {
+    try {
+      return state.firstWhere((e) => e.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Add a new signal entry
+  void addSignal(SignalEntry entry) {
+    state = [...state, entry];
+    _saveToDisk();
+  }
+
+  /// Update an existing signal
+  void updateSignal(String id, SignalEntry updated) {
+    state = [
+      for (final entry in state)
+        entry.id == id ? updated : entry,
+    ];
+    _saveToDisk();
+  }
+
+  /// Delete a signal
+  void deleteSignal(String id) {
+    state = state.where((e) => e.id != id).toList();
+    _saveToDisk();
+  }
+
+  /// Add training result to a signal (by name or create new)
+  void addTrainingResult(String signalName, TrainingResult result) {
+    final existing = getByName(signalName);
+    
+    if (existing != null) {
+      existing.addTrainingResult(result);
+      state = [...state]; // Trigger rebuild
+      _saveToDisk();
+    } else {
+      // Create new signal entry
+      final newEntry = SignalEntry(
+        id: 'sig_${DateTime.now().millisecondsSinceEpoch}',
+        name: signalName,
+        totalDataLabels: result.dataLabels,
+        f1Score: result.f1Score,
+        precision: result.precision,
+        recall: result.recall,
+        trainingHistory: [result],
+      );
+      addSignal(newEntry);
+    }
+    
+    debugPrint('[SignalDB] Training result added for "$signalName": F1=${result.f1Score.toStringAsFixed(2)}, labels=${result.dataLabels}');
+  }
+
+  /// Increment detection count for a signal
+  void incrementDetectionCount(String signalName) {
+    final existing = getByName(signalName);
+    if (existing != null) {
+      existing.incrementDetectionCount();
+      state = [...state];
+      _saveToDisk();
+    }
+  }
+
+  /// Get or create signal entry (for detection/training)
+  SignalEntry getOrCreate(String signalName) {
+    final existing = getByName(signalName);
+    if (existing != null) return existing;
+    
+    // Create new entry
+    final newEntry = SignalEntry(
+      id: 'sig_${DateTime.now().millisecondsSinceEpoch}',
+      name: signalName.toLowerCase(),
     );
-    
-    final configs = [...state.missionConfigs, config];
-    state = state.copyWith(missionConfigs: configs);
-    
-    return config;
-  }
-
-  /// Load a mission config
-  void loadMissionConfig(MissionConfig config) {
-    state = state.copyWith(activeMissionConfig: config);
-  }
-
-  /// Get profiles for active mission
-  List<SignalProfile> getActiveMissionProfiles() {
-    if (state.activeMissionConfig == null) return [];
-    return state.activeMissionConfig!.signalProfileIds
-        .where((id) => state.profiles.containsKey(id))
-        .map((id) => state.profiles[id]!)
-        .toList();
+    addSignal(newEntry);
+    return newEntry;
   }
 }
 
-class SignalDatabaseState {
-  final Map<String, SignalProfile> profiles;
-  final List<DetectionRecord> detections;
-  final List<MissionConfig> missionConfigs;
-  final MissionConfig? activeMissionConfig;
-
-  SignalDatabaseState({
-    required this.profiles,
-    required this.detections,
-    required this.missionConfigs,
-    this.activeMissionConfig,
-  });
-
-  factory SignalDatabaseState.initial() => SignalDatabaseState(
-    profiles: {},
-    detections: [],
-    missionConfigs: [],
-  );
-
-  /// Copy with support for nullable activeMissionConfig
-  /// Use clearActiveMission: true to explicitly set activeMissionConfig to null
-  SignalDatabaseState copyWith({
-    Map<String, SignalProfile>? profiles,
-    List<DetectionRecord>? detections,
-    List<MissionConfig>? missionConfigs,
-    MissionConfig? activeMissionConfig,
-    bool clearActiveMission = false,
-  }) {
-    return SignalDatabaseState(
-      profiles: profiles ?? this.profiles,
-      detections: detections ?? this.detections,
-      missionConfigs: missionConfigs ?? this.missionConfigs,
-      activeMissionConfig: clearActiveMission ? null : (activeMissionConfig ?? this.activeMissionConfig),
-    );
-  }
-}
-
-/// Provider for the signal database
-final signalDatabaseProvider = StateNotifierProvider<SignalDatabaseNotifier, SignalDatabaseState>((ref) {
+/// Provider for signal database
+final signalDatabaseProvider = StateNotifierProvider<SignalDatabaseNotifier, List<SignalEntry>>((ref) {
   return SignalDatabaseNotifier();
 });
 
-/// Mock MGRS generator (in production, use real GPS + conversion)
-String generateMockMgrs() {
-  final random = DateTime.now().millisecondsSinceEpoch;
-  final zone = '17T';
-  final grid = 'LJ';
-  final easting = 88340 + (random % 100);
-  final northing = 16400 + ((random ~/ 100) % 100);
-  return '$zone$grid$easting$northing';
-}
+/// Provider to get a single signal by name
+final signalByNameProvider = Provider.family<SignalEntry?, String>((ref, name) {
+  final db = ref.watch(signalDatabaseProvider);
+  final lower = name.toLowerCase();
+  try {
+    return db.firstWhere((e) => e.name.toLowerCase() == lower);
+  } catch (_) {
+    return null;
+  }
+});

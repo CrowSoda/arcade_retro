@@ -62,7 +62,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                   context.go(AppRoutes.training);
                   break;
                 case 2:
-                  context.go(AppRoutes.config);
+                  context.go(AppRoutes.mission);
                   break;
                 case 3:
                   context.go(AppRoutes.database);
@@ -131,9 +131,9 @@ class _AppShellState extends ConsumerState<AppShell> {
                 label: Text('Training'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.inventory_2_outlined),
-                selectedIcon: Icon(Icons.inventory_2),
-                label: Text('Config'),
+                icon: Icon(Icons.rocket_launch_outlined),
+                selectedIcon: Icon(Icons.rocket_launch),
+                label: Text('Mission'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.storage_outlined),

@@ -449,6 +449,11 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
     );
   }
 
+  /// Update pending duration (called from duration dialog after drawing)
+  void setPendingDuration(int minutes) {
+    state = state.copyWith(pendingDuration: minutes);
+  }
+
   /// Generate signal name: man_[DTG]_[FREQ]MHz
   String _generateSignalName(String freqMHz) {
     final now = DateTime.now().toUtc();

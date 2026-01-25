@@ -12,6 +12,7 @@ import '../../../core/config/theme.dart';
 import '../../../core/services/backend_launcher.dart';
 import '../providers/video_stream_provider.dart';
 import '../providers/map_provider.dart' show getSOIColor, soiVisibilityProvider;
+import '../providers/sdr_config_provider.dart';
 import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider, waterfallFpsProvider;
 
 /// Waterfall display using row-strip streaming
@@ -139,14 +140,27 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
               // Background
               Container(color: G20Colors.surfaceDark),
               
-              // Waterfall image (rendered from pixel buffer)
+              // Waterfall image (rendered from pixel buffer) with long-press for manual capture
               Positioned(
                 left: plotRect.left,
                 top: plotRect.top,
                 width: plotRect.width,
                 height: plotRect.height,
-                child: _buildWaterfall(streamState),
+                child: GestureDetector(
+                  onLongPress: () {
+                    final sdrConfig = ref.read(sdrConfigProvider);
+                    // Start drawing mode immediately - duration selection comes AFTER drawing
+                    ref.read(manualCaptureProvider.notifier).startDrawingMode(
+                      sdrConfig.centerFreqMHz.toStringAsFixed(1),
+                      durationMinutes: 1,  // Will be updated after drawing
+                    );
+                  },
+                  child: _buildWaterfall(streamState),
+                ),
               ),
+              
+              // Manual capture drawing overlay
+              _VideoDrawingOverlay(plotRect: plotRect),
               
               // Detection overlay (row-index based positioning)
               Positioned(
@@ -322,8 +336,8 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
   Widget _buildStatsOverlay(VideoStreamState state) {
     if (!state.isConnected) return const SizedBox.shrink();
     
-    final metadata = state.metadata;
-    final mode = metadata?.mode ?? 'unknown';
+    final isRecording = state.isRecording;
+    final sourceLabel = state.waterfallSource.label;
     final bufferInfo = '${state.bufferWidth}×${state.bufferHeight}';
     
     return Container(
@@ -336,6 +350,31 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Recording indicator with red dot for recording states
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isRecording)
+                Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              Text(
+                sourceLabel,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isRecording ? Colors.red : Colors.grey,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          // FPS display
           Text(
             '${state.fps.toStringAsFixed(1)} fps',
             style: const TextStyle(
@@ -349,17 +388,153 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
             style: const TextStyle(fontSize: 9, color: Colors.white70),
           ),
           Text(
-            mode.toUpperCase(),
-            style: TextStyle(
-              fontSize: 9,
-              color: mode == 'row_strip' ? Colors.greenAccent : Colors.orangeAccent,
-            ),
-          ),
-          Text(
             'rows: ${state.totalRowsReceived}',
             style: const TextStyle(fontSize: 8, color: Colors.white54),
           ),
         ],
+      ),
+    );
+  }
+  
+  /// Show duration selection dialog before entering drawing mode
+  void _showCaptureDurationDialog(BuildContext context, WidgetRef ref, double centerFreqMHz) {
+    showDialog(
+      context: context,
+      builder: (context) => _CaptureDurationDialog(
+        centerFreqMHz: centerFreqMHz,
+      ),
+    );
+  }
+}
+
+/// Duration selection dialog - shown on long-press before drawing mode
+class _CaptureDurationDialog extends ConsumerStatefulWidget {
+  final double centerFreqMHz;
+
+  const _CaptureDurationDialog({required this.centerFreqMHz});
+
+  @override
+  ConsumerState<_CaptureDurationDialog> createState() => _CaptureDurationDialogState();
+}
+
+class _CaptureDurationDialogState extends ConsumerState<_CaptureDurationDialog> {
+  int _durationMinutes = 1;  // Default 1 min
+  
+  static const _durations = [1, 2, 5, 10];  // minutes
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: G20Colors.surfaceDark,
+      title: Row(
+        children: [
+          Container(
+            width: 12, height: 12,
+            decoration: const BoxDecoration(color: G20Colors.primary, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Manual Capture',
+              style: TextStyle(fontSize: 14, color: G20Colors.textPrimaryDark),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Frequency info
+          Text(
+            'Center Freq: ${widget.centerFreqMHz.toStringAsFixed(2)} MHz',
+            style: const TextStyle(fontSize: 12, color: G20Colors.textSecondaryDark),
+          ),
+          const SizedBox(height: 16),
+          
+          // Duration selector
+          const Text('Capture Duration:', style: TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: _durations.map((d) => _DurationChip(
+              minutes: d,
+              isSelected: _durationMinutes == d,
+              onTap: () => setState(() => _durationMinutes = d),
+            )).toList(),
+          ),
+          
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: G20Colors.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: G20Colors.primary.withOpacity(0.3)),
+            ),
+            child: const Text(
+              'After clicking Continue, swipe on the waterfall to select frequency range',
+              style: TextStyle(fontSize: 11, color: G20Colors.textSecondaryDark),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: G20Colors.textSecondaryDark)),
+        ),
+        ElevatedButton(
+          onPressed: () => _startDrawingMode(context),
+          style: ElevatedButton.styleFrom(backgroundColor: G20Colors.primary),
+          child: const Text('Continue'),
+        ),
+      ],
+    );
+  }
+
+  void _startDrawingMode(BuildContext context) {
+    Navigator.pop(context);
+    
+    // Start drawing mode with selected duration
+    ref.read(manualCaptureProvider.notifier).startDrawingMode(
+      widget.centerFreqMHz.toStringAsFixed(2),
+      durationMinutes: _durationMinutes,
+    );
+  }
+}
+
+/// Duration chip button
+class _DurationChip extends StatelessWidget {
+  final int minutes;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _DurationChip({
+    required this.minutes,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? G20Colors.primary : G20Colors.cardDark,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          '$minutes min',
+          style: TextStyle(
+            fontSize: 12,
+            color: isSelected ? Colors.white : G20Colors.textSecondaryDark,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
       ),
     );
   }
@@ -567,6 +742,268 @@ class _DetectionBoxWidget extends StatelessWidget {
           width: 2,
         ),
         color: color.withOpacity(0.15),
+      ),
+    );
+  }
+}
+
+/// Drawing overlay for manual capture - long press waterfall, then drag to draw bounding box
+/// This captures a subband and saves it as .rfcap for labeling in Training tab
+class _VideoDrawingOverlay extends ConsumerWidget {
+  final Rect plotRect;
+
+  const _VideoDrawingOverlay({required this.plotRect});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final captureState = ref.watch(manualCaptureProvider);
+    
+    if (!captureState.isDrawing) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      left: plotRect.left,
+      top: plotRect.top,
+      width: plotRect.width,
+      height: plotRect.height,
+      child: Stack(
+        children: [
+          // Semi-transparent overlay
+          Container(color: Colors.black.withOpacity(0.3)),
+          
+          // Gesture detector for drawing
+          GestureDetector(
+            onPanStart: (details) {
+              final x = details.localPosition.dx / plotRect.width;
+              ref.read(manualCaptureProvider.notifier).startDrawing(x.clamp(0, 1), 0);
+            },
+            onPanUpdate: (details) {
+              final x = details.localPosition.dx / plotRect.width;
+              ref.read(manualCaptureProvider.notifier).updateDrawing(x.clamp(0, 1), 1);
+            },
+            onPanEnd: (_) {
+              ref.read(manualCaptureProvider.notifier).finishDrawing();
+            },
+            child: Container(color: Colors.transparent),
+          ),
+          
+          // The drawn box (if any)
+          if (captureState.hasPendingBox)
+            _VideoDrawnBox(
+              x1: captureState.pendingBoxX1!,
+              y1: captureState.pendingBoxY1!,
+              x2: captureState.pendingBoxX2!,
+              y2: captureState.pendingBoxY2!,
+              plotRect: plotRect,
+            ),
+          
+          // Instructions at top
+          Positioned(
+            top: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: G20Colors.warning.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  captureState.hasPendingBox 
+                      ? (captureState.isCapturing ? 'Queue this capture?' : 'Start this capture?')
+                      : 'Swipe left to right to select frequency range',
+                  style: const TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ),
+          
+          // Action buttons at bottom
+          if (captureState.hasPendingBox)
+            Positioned(
+              bottom: 8,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => ref.read(manualCaptureProvider.notifier).adjustBox(),
+                    style: ElevatedButton.styleFrom(backgroundColor: G20Colors.cardDark),
+                    child: const Text('Redraw'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: () => ref.read(manualCaptureProvider.notifier).cancelDrawing(),
+                    style: ElevatedButton.styleFrom(backgroundColor: G20Colors.error),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: () {
+                      // Show duration dialog AFTER drawing box
+                      _showDurationDialogAfterDraw(context, ref);
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: G20Colors.success),
+                    child: const Text('Next'),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Show duration dialog AFTER user draws the box
+void _showDurationDialogAfterDraw(BuildContext context, WidgetRef ref) {
+  final sdrConfig = ref.read(sdrConfigProvider);
+  showDialog(
+    context: context,
+    builder: (dialogContext) => _PostDrawDurationDialog(
+      centerFreqMHz: sdrConfig.centerFreqMHz,
+    ),
+  );
+}
+
+/// Duration dialog shown AFTER drawing - selecting duration starts the capture
+class _PostDrawDurationDialog extends ConsumerStatefulWidget {
+  final double centerFreqMHz;
+
+  const _PostDrawDurationDialog({required this.centerFreqMHz});
+
+  @override
+  ConsumerState<_PostDrawDurationDialog> createState() => _PostDrawDurationDialogState();
+}
+
+class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog> {
+  int _durationMinutes = 1;  // Default 1 min
+  
+  static const _durations = [1, 2, 5, 10];  // minutes
+
+  @override
+  Widget build(BuildContext context) {
+    final captureState = ref.watch(manualCaptureProvider);
+    
+    return AlertDialog(
+      backgroundColor: G20Colors.surfaceDark,
+      title: Row(
+        children: [
+          Container(
+            width: 12, height: 12,
+            decoration: const BoxDecoration(color: G20Colors.warning, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Set Capture Duration',
+              style: TextStyle(fontSize: 14, color: G20Colors.textPrimaryDark),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Frequency info
+          Text(
+            'Center Freq: ${widget.centerFreqMHz.toStringAsFixed(2)} MHz',
+            style: const TextStyle(fontSize: 12, color: G20Colors.textSecondaryDark),
+          ),
+          const SizedBox(height: 16),
+          
+          // Duration selector
+          const Text('How long to capture?', style: TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: _durations.map((d) => _DurationChip(
+              minutes: d,
+              isSelected: _durationMinutes == d,
+              onTap: () => setState(() => _durationMinutes = d),
+            )).toList(),
+          ),
+          
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: G20Colors.success.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: G20Colors.success.withOpacity(0.3)),
+            ),
+            child: Text(
+              captureState.isCapturing 
+                  ? 'This capture will be queued after the current one completes'
+                  : 'Capture will start immediately and save to Training tab',
+              style: const TextStyle(fontSize: 11, color: G20Colors.textSecondaryDark),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context);
+            // Go back to drawing mode (don't cancel it)
+          },
+          child: const Text('Back', style: TextStyle(color: G20Colors.textSecondaryDark)),
+        ),
+        ElevatedButton(
+          onPressed: () => _startCapture(context),
+          style: ElevatedButton.styleFrom(backgroundColor: G20Colors.success),
+          child: Text(captureState.isCapturing ? 'Queue Capture' : 'Start Capture'),
+        ),
+      ],
+    );
+  }
+
+  void _startCapture(BuildContext context) {
+    Navigator.pop(context);
+    
+    final notifier = ref.read(manualCaptureProvider.notifier);
+    
+    // Update the pending duration with the selected value
+    notifier.setPendingDuration(_durationMinutes);
+    
+    // Now start the capture with the correct duration
+    notifier.confirmAndStart();
+  }
+}
+
+/// The drawn bounding box for subband selection
+class _VideoDrawnBox extends StatelessWidget {
+  final double x1, y1, x2, y2;
+  final Rect plotRect;
+
+  const _VideoDrawnBox({
+    required this.x1, required this.y1,
+    required this.x2, required this.y2,
+    required this.plotRect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final left = (x1 < x2 ? x1 : x2) * plotRect.width;
+    final top = (y1 < y2 ? y1 : y2) * plotRect.height;
+    final width = (x1 - x2).abs() * plotRect.width;
+    final height = (y1 - y2).abs() * plotRect.height;
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: width.clamp(4.0, plotRect.width),
+      height: height.clamp(4.0, plotRect.height),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: G20Colors.warning, width: 3),
+          color: G20Colors.warning.withOpacity(0.2),
+        ),
       ),
     );
   }
