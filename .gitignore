@@ -1,4 +1,4 @@
-# G20 Demo - Git Ignore
+giot # G20 Demo - Git Ignore
 # ======================
 
 # Old/disabled git folders
@@ -51,6 +51,10 @@ venv/
 .venv/
 ENV/
 env/
+
+# Backend process tracking (used for stale PID cleanup)
+.backend.pid
+backend/.backend.pid
 
 # ======================
 # PROJECT-SPECIFIC DATA (LARGE FILES - DO NOT COMMIT)

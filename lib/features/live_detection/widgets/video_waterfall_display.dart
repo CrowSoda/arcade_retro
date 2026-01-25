@@ -1,11 +1,11 @@
 // lib/features/live_detection/widgets/video_waterfall_display.dart
-/// Video-based waterfall display using H.264/JPEG streaming
-/// Supports JPEG frames (immediate) and H.264 (future media_kit integration)
-/// 
-/// Detection boxes are rendered as Flutter overlays (not burned into video)
-/// This allows for proper time-synchronized scrolling based on PTS.
+/// Row-strip waterfall display - renders from local RGBA pixel buffer
+/// Receives strips from backend, stitches locally, renders with RawImage
+/// Detection boxes tracked by row index for perfect sync
 
+import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/theme.dart';
@@ -14,8 +14,7 @@ import '../providers/video_stream_provider.dart';
 import '../providers/map_provider.dart' show getSOIColor, soiVisibilityProvider;
 import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider;
 
-/// Waterfall display using video streaming
-/// Supports JPEG frames (immediate) and H.264 (future)
+/// Waterfall display using row-strip streaming
 class VideoWaterfallDisplay extends ConsumerStatefulWidget {
   final String host;
   
@@ -30,16 +29,19 @@ class VideoWaterfallDisplay extends ConsumerStatefulWidget {
 
 class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
   bool _hasAttemptedConnect = false;
+  ui.Image? _waterfallImage;
+  ui.Image? _previousImage;  // Double-buffer: keeps old image alive for one more frame
+  int _lastFrameCount = -1;
 
   @override
   void initState() {
     super.initState();
-    // Don't auto-connect here - wait for backend port discovery
   }
 
   @override
   void dispose() {
-    // Don't disconnect here - let the provider handle lifecycle
+    _waterfallImage?.dispose();
+    _previousImage?.dispose();
     super.dispose();
   }
 
@@ -52,6 +54,23 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     notifier.connect(widget.host, port);
   }
 
+  /// Convert RGBA pixel buffer to ui.Image for rendering
+  Future<ui.Image?> _createImageFromPixels(Uint8List pixels, int width, int height) async {
+    if (pixels.isEmpty || width <= 0 || height <= 0) return null;
+    
+    final completer = Completer<ui.Image>();
+    
+    ui.decodeImageFromPixels(
+      pixels,
+      width,
+      height,
+      ui.PixelFormat.rgba8888,
+      (image) => completer.complete(image),
+    );
+    
+    return completer.future;
+  }
+
   @override
   Widget build(BuildContext context) {
     final streamState = ref.watch(videoStreamProvider);
@@ -59,7 +78,6 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     
     // Listen for time span changes and send to backend
     ref.listen<double>(waterfallTimeSpanProvider, (previous, next) {
-      // Must read current state inside callback, not use stale streamState
       final currentState = ref.read(videoStreamProvider);
       debugPrint('[Waterfall] Time span listener fired: $previous → $next, connected: ${currentState.isConnected}');
       if (previous != next && currentState.isConnected) {
@@ -70,9 +88,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     // Send initial time span when connection state changes to connected
     ref.listen<VideoStreamState>(videoStreamProvider, (previous, next) {
       if (previous?.isConnected != true && next.isConnected) {
-        // Just became connected - send current time span
         final currentTimeSpan = ref.read(waterfallTimeSpanProvider);
-        // Only send if not default (5.0) since backend starts with 5.0
         if ((currentTimeSpan - 5.0).abs() > 0.1) {
           ref.read(videoStreamProvider.notifier).setTimeSpan(currentTimeSpan);
         }
@@ -110,7 +126,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
               // Background
               Container(color: G20Colors.surfaceDark),
               
-              // Waterfall image (clean, no boxes burned in)
+              // Waterfall image (rendered from pixel buffer)
               Positioned(
                 left: plotRect.left,
                 top: plotRect.top,
@@ -119,14 +135,15 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
                 child: _buildWaterfall(streamState),
               ),
               
-              // Detection overlay (Flutter-rendered, scrolls with PTS)
+              // Detection overlay (row-index based positioning)
               Positioned(
                 left: plotRect.left,
                 top: plotRect.top,
                 width: plotRect.width,
                 height: plotRect.height,
                 child: _DetectionOverlayLayer(
-                  currentPts: streamState.currentPts,
+                  totalRowsReceived: streamState.totalRowsReceived,
+                  bufferHeight: streamState.bufferHeight,
                   detections: streamState.detections,
                 ),
               ),
@@ -166,11 +183,11 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
   }
 
   Widget _buildWaterfall(VideoStreamState state) {
-    final frame = state.currentFrame;
-
-    if (frame == null || frame.isEmpty) {
+    final pixelBuffer = state.pixelBuffer;
+    
+    if (pixelBuffer == null || pixelBuffer.isEmpty) {
       return Container(
-        color: const Color(0xFF1A0033), // Dark viridis color
+        color: const Color(0xFF1A0033),
         child: const Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -178,7 +195,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
               CircularProgressIndicator(color: G20Colors.primary),
               SizedBox(height: 16),
               Text(
-                'Waiting for video stream...',
+                'Waiting for waterfall stream...',
                 style: TextStyle(color: Colors.white54),
               ),
             ],
@@ -187,38 +204,36 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
       );
     }
 
-    // JPEG mode - display image directly
-    return Image.memory(
-      frame,
-      fit: BoxFit.fill,
-      filterQuality: FilterQuality.high,
-      gaplessPlayback: true, // Prevent flicker between frames
-      errorBuilder: (context, error, stack) {
-        return Container(
-          color: const Color(0xFF1A0033),
-          child: Center(
-            child: Text(
-              'Frame decode error: $error',
-              style: const TextStyle(color: Colors.red),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  List<Widget> _buildDetectionOverlay(VideoStreamState state, Rect plotRect) {
-    if (state.detections.isEmpty) {
-      return [];
+    // Only rebuild image when frame count changes
+    if (state.frameCount != _lastFrameCount) {
+      _lastFrameCount = state.frameCount;
+      
+      // DOUBLE-BUFFER: Create image async, don't block
+      _createImageFromPixels(pixelBuffer, state.bufferWidth, state.bufferHeight)
+          .then((newImage) {
+        if (newImage != null && mounted) {
+          setState(() {
+            // Dispose the OLD previous image (not the current one!)
+            _previousImage?.dispose();
+            // Move current to previous
+            _previousImage = _waterfallImage;
+            // Set new as current
+            _waterfallImage = newImage;
+          });
+        }
+      });
     }
-
-    return state.detections.map((det) {
-      return _VideoDetectionBox(
-        detection: det,
-        plotRect: plotRect,
-        onTap: () => ref.read(videoStreamProvider.notifier).selectDetection(det.detectionId),
+    
+    // Always return current image (or placeholder)
+    if (_waterfallImage != null) {
+      return RawImage(
+        image: _waterfallImage,
+        fit: BoxFit.fill,
+        filterQuality: FilterQuality.low,
       );
-    }).toList();
+    }
+    
+    return Container(color: const Color(0xFF1A0033));
   }
 
   Widget _buildConnectionOverlay(VideoStreamState state) {
@@ -240,7 +255,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
                     const CircularProgressIndicator(color: G20Colors.primary),
                     const SizedBox(height: 16),
                     const Text(
-                      'Connecting to video stream...',
+                      'Connecting to row-strip stream...',
                       style: TextStyle(color: Colors.white),
                     ),
                   ] else if (port == null) ...[
@@ -262,7 +277,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
                       onPressed: () {
-                        _hasAttemptedConnect = false; // Allow reconnect
+                        _hasAttemptedConnect = false;
                         ref.read(videoStreamProvider.notifier).connect(widget.host, port);
                       },
                       icon: const Icon(Icons.refresh),
@@ -285,10 +300,8 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     if (!state.isConnected) return const SizedBox.shrink();
     
     final metadata = state.metadata;
-    final encoder = metadata?.encoder ?? 'unknown';
-    final resolution = metadata != null 
-        ? '${metadata.videoWidth}×${metadata.videoHeight}'
-        : '?×?';
+    final mode = metadata?.mode ?? 'unknown';
+    final bufferInfo = '${state.bufferWidth}×${state.bufferHeight}';
     
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -309,15 +322,19 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
             ),
           ),
           Text(
-            resolution,
+            bufferInfo,
             style: const TextStyle(fontSize: 9, color: Colors.white70),
           ),
           Text(
-            encoder.split('/').last.toUpperCase(),
+            mode.toUpperCase(),
             style: TextStyle(
               fontSize: 9,
-              color: encoder.contains('h264') ? Colors.greenAccent : Colors.orangeAccent,
+              color: mode == 'row_strip' ? Colors.greenAccent : Colors.orangeAccent,
             ),
+          ),
+          Text(
+            'rows: ${state.totalRowsReceived}',
+            style: const TextStyle(fontSize: 8, color: Colors.white54),
           ),
         ],
       ),
@@ -381,7 +398,6 @@ class _VideoFrequencyAxis extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Default values if no metadata
     const centerFreqMHz = 825.0;
     const bandwidthMHz = 20.0;
 
@@ -411,105 +427,19 @@ class _VideoFrequencyAxis extends StatelessWidget {
   }
 }
 
-/// Detection bounding box for video waterfall
-class _VideoDetectionBox extends StatelessWidget {
-  final VideoDetection detection;
-  final Rect plotRect;
-  final VoidCallback onTap;
-
-  const _VideoDetectionBox({
-    required this.detection,
-    required this.plotRect,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Detection coordinates are normalized 0-1 from the inference
-    // x1, x2 = time axis (maps to Y in waterfall, but for video it's time within frame)
-    // y1, y2 = frequency axis (maps to X in waterfall)
-    
-    // For video frames, detections are overlaid on the current frame
-    // The y coordinates map to horizontal position (frequency)
-    // The x coordinates represent the vertical position (time within the accumulated frame)
-    
-    final left = plotRect.left + detection.y1 * plotRect.width;
-    final right = plotRect.left + detection.y2 * plotRect.width;
-    final top = plotRect.top + detection.x1 * plotRect.height;
-    final bottom = plotRect.top + detection.x2 * plotRect.height;
-
-    final boxWidth = (right - left).abs();
-    final boxHeight = (bottom - top).abs();
-
-    // Skip if box is too small or outside bounds
-    if (boxWidth < 4 || boxHeight < 4) {
-      return const SizedBox.shrink();
-    }
-
-    final color = _getDetectionColor(detection.className);
-
-    return Positioned(
-      left: left,
-      top: top,
-      width: boxWidth,
-      height: boxHeight,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: color,
-              width: detection.isSelected ? 3 : 2,
-            ),
-            color: color.withOpacity(detection.isSelected ? 0.2 : 0.05),
-          ),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              color: color.withOpacity(0.8),
-              child: Text(
-                '${detection.className} ${(detection.confidence * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(
-                  fontSize: 9,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _getDetectionColor(String className) {
-    switch (className.toLowerCase()) {
-      case 'creamy_chicken':
-        return Colors.orange;
-      case 'bluetooth':
-        return Colors.blue;
-      case 'wifi':
-        return Colors.green;
-      case 'lte':
-        return Colors.purple;
-      default:
-        return Colors.cyan;
-    }
-  }
-}
-
-/// Detection overlay layer with DIRECT COORDINATE MAPPING
+/// Detection overlay layer with ROW-INDEX positioning
 /// 
-/// Detection coordinates (x1/x2/y1/y2) are normalized 0-1 from the inference image.
-/// - x1/x2 = vertical position (time axis in waterfall)
-/// - y1/y2 = horizontal position (frequency axis in waterfall)
+/// Detection.absoluteRow = which row the detection was made at
+/// totalRowsReceived = current bottom row of the buffer
+/// Position: rowsAgo = totalRowsReceived - detection.absoluteRow
 class _DetectionOverlayLayer extends ConsumerWidget {
-  final double currentPts;
+  final int totalRowsReceived;
+  final int bufferHeight;
   final List<VideoDetection> detections;
 
   const _DetectionOverlayLayer({
-    required this.currentPts,
+    required this.totalRowsReceived,
+    required this.bufferHeight,
     required this.detections,
   });
 
@@ -524,6 +454,9 @@ class _DetectionOverlayLayer extends ConsumerWidget {
         final plotWidth = constraints.maxWidth;
         final plotHeight = constraints.maxHeight;
         
+        // Pixels per row
+        final pixelsPerRow = bufferHeight > 0 ? plotHeight / bufferHeight : 1.0;
+        
         final visibleBoxes = <Widget>[];
         
         for (final det in detections) {
@@ -531,32 +464,46 @@ class _DetectionOverlayLayer extends ConsumerWidget {
           final isVisible = ref.watch(soiVisibilityProvider(det.className));
           if (!isVisible) continue;
           
-          // DIRECT COORDINATE MAPPING (not PTS-based)
-          // x1/x2 = vertical position on inference image → maps to Y (time axis)
-          // y1/y2 = horizontal position on inference image → maps to X (frequency axis)
-          final top = det.x1 * plotHeight;
-          final bottom = det.x2 * plotHeight;
+          // === FREQUENCY AXIS (X) - from y1/y2 ===
           final left = det.y1 * plotWidth;
           final right = det.y2 * plotWidth;
+          final boxWidth = (right - left).abs();
           
-          final width = (right - left).abs();
-          final height = (bottom - top).abs();
+          // === TIME AXIS (Y) - ROW-INDEX positioning ===
+          // How many rows ago was this detection?
+          final rowsAgo = totalRowsReceived - det.absoluteRow;
+          
+          // Skip if outside visible range
+          if (rowsAgo < 0 || rowsAgo >= bufferHeight) continue;
+          
+          // Box height from rowSpan
+          final boxHeight = (det.rowSpan * pixelsPerRow).clamp(8.0, plotHeight * 0.3);
+          
+          // Y position: rowsAgo=0 → bottom, rowsAgo=bufferHeight → top
+          final boxBottom = plotHeight - (rowsAgo * pixelsPerRow);
+          final boxTop = boxBottom - boxHeight;
+          
+          // Skip if outside visible area
+          if (boxTop > plotHeight || boxBottom < 0) continue;
           
           // Skip if too small
-          if (width < 4 || height < 4) continue;
+          if (boxWidth < 4) continue;
           
-          // Use getSOIColor for correct matching color
           final color = getSOIColor(det.className);
+          
+          // Debug info
+          final debugStr = 'row=${det.absoluteRow} ago=$rowsAgo';
           
           visibleBoxes.add(
             Positioned(
-              left: left.clamp(0.0, plotWidth - width),
-              top: top.clamp(0.0, plotHeight - height),
-              width: width.clamp(4.0, plotWidth),
-              height: height.clamp(4.0, plotHeight),
+              left: left.clamp(0.0, plotWidth - boxWidth),
+              top: boxTop.clamp(0.0, plotHeight - boxHeight),
+              width: boxWidth.clamp(4.0, plotWidth),
+              height: boxHeight.clamp(8.0, plotHeight),
               child: _DetectionBoxWidget(
                 detection: det,
                 color: color,
+                debugInfo: debugStr,
               ),
             ),
           );
@@ -575,14 +522,18 @@ class _DetectionOverlayLayer extends ConsumerWidget {
 class _DetectionBoxWidget extends StatelessWidget {
   final VideoDetection detection;
   final Color color;
+  final String? debugInfo;
 
   const _DetectionBoxWidget({
     required this.detection,
     required this.color,
+    this.debugInfo,
   });
 
   @override
   Widget build(BuildContext context) {
+    final showDebug = debugInfo != null && debugInfo!.isNotEmpty;
+    
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
@@ -591,21 +542,38 @@ class _DetectionBoxWidget extends StatelessWidget {
         ),
         color: color.withOpacity(detection.isSelected ? 0.25 : 0.1),
       ),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-          color: color.withOpacity(0.85),
-          child: Text(
-            '${detection.className} ${(detection.confidence * 100).toStringAsFixed(0)}%',
-            style: const TextStyle(
-              fontSize: 8,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+            color: color.withOpacity(0.85),
+            child: Text(
+              '${detection.className} ${(detection.confidence * 100).toStringAsFixed(0)}%',
+              style: const TextStyle(
+                fontSize: 8,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-        ),
+          if (showDebug)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+              color: Colors.black54,
+              child: Text(
+                debugInfo!,
+                style: const TextStyle(
+                  fontSize: 7,
+                  color: Colors.yellow,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
+

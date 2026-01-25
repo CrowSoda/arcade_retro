@@ -289,7 +289,7 @@ class TripleBufferedPipeline:
             
             for i in range(len(boxes)):
                 box = boxes[i]
-                detections.append(Detection(
+                det = Detection(
                     box_id=i,
                     x1=float(box[0]) / 1024,  # Normalized 0-1
                     y1=float(box[1]) / 1024,
@@ -299,7 +299,10 @@ class TripleBufferedPipeline:
                     class_id=int(labels[i]),
                     class_name=self.class_names[int(labels[i])] if int(labels[i]) < len(self.class_names) else 'unknown',
                     parent_pts=pts,
-                ))
+                )
+                detections.append(det)
+                # DEBUG: Print raw detection coordinates
+                print(f"[DET RAW] box_id={det.box_id} x1={det.x1:.3f} y1={det.y1:.3f} x2={det.x2:.3f} y2={det.y2:.3f} class={det.class_name} conf={det.confidence:.2f} pts={det.parent_pts:.3f}", flush=True)
         
         inference_ms = (time.perf_counter() - start_time) * 1000
         self.current_stream = (self.current_stream + 1) % self.num_streams
@@ -586,68 +589,67 @@ async def unified_ws_handler(websocket, iq_file: str, model_path: str):
 
 
 # =============================================================================
-# VIDEO STREAMING SERVER - New H.264/JPEG encoded video streaming
+# ROW-STRIP STREAMING SERVER - Lightweight row-based waterfall streaming
 # =============================================================================
 
 class VideoStreamServer:
     """
-    Video streaming server using H.264/JPEG encoding.
+    Row-strip streaming server - sends FFT row strips instead of full frames.
+    
+    Flutter client maintains the pixel buffer and stitches strips together.
+    This is more efficient and allows perfect row-index based box tracking.
     
     Protocol:
-    - 0x01 + bytes: Video frame (H.264 NAL units or JPEG)
-    - 0x02 + json:  Detection data (still sent for logging/metadata)
-    - 0x03 + json:  Metadata (encoder type, dimensions, etc.)
+    - 0x01 + bytes: Row strip (zlib compressed RGB pixels)
+    - 0x02 + json:  Detection data with absolute row indices
+    - 0x03 + json:  Metadata (strip dimensions, total rows, etc.)
     
-    Detection boxes are BURNED INTO the video frame for perfect sync.
+    Detection boxes tracked by absolute row index - Flutter handles positioning.
     """
     
     # Message type constants
-    MSG_VIDEO = 0x01
-    MSG_DETECTION = 0x02
-    MSG_METADATA = 0x03
+    MSG_STRIP = 0x01      # Row strip data
+    MSG_DETECTION = 0x02  # Detection JSON
+    MSG_METADATA = 0x03   # Stream metadata
+    
+    # Keep old name for compatibility
+    MSG_VIDEO = MSG_STRIP
     
     def __init__(
         self,
         iq_file: str,
         model_path: str,
         video_width: int = 2048,
-        time_span_seconds: float = 5.0,  # Configurable time span
+        time_span_seconds: float = 5.0,  # Used for Flutter buffer sizing hint
         video_fps: int = 30,
     ):
         self.iq_source = UnifiedIQSource(iq_file)
         self.pipeline = TripleBufferedPipeline(model_path)
         
-        # Video parameters
+        # Strip parameters
         self.video_width = video_width
         self.video_fps = video_fps
         self.time_span_seconds = time_span_seconds
         
-        # Calculate height from time span (time_span * fps = rows)
-        self.video_height = int(time_span_seconds * video_fps)
+        # Calculate rows_per_frame from FFT settings
+        # At 20MHz sample rate, 33ms = 660,000 samples
+        # With FFT=32768, hop=16384: num_ffts = (660000 - 32768) / 16384 + 1 ≈ 38
+        sample_rate = 20e6
+        chunk_duration_ms = 33.0
+        samples_per_chunk = int(sample_rate * chunk_duration_ms / 1000)  # 660,000
+        fft_size = self.pipeline.waterfall_fft_size  # 32768
+        hop_size = fft_size // 2  # 16384
+        self.rows_per_frame = max(1, (samples_per_chunk - fft_size) // hop_size + 1)  # ~38
         
-        # Waterfall frame buffer - height matches time span
-        self.waterfall_buffer = WaterfallBuffer(
-            width=video_width,
-            height=self.video_height,
-            dynamic_range_db=80.0,
-            colormap='viridis',
-        )
+        # ROW-STRIP MODE: No large buffer needed! Just colormap for encoding strips
+        # Flutter maintains its own pixel buffer
+        self.video_height = self.rows_per_frame  # Strip height = rows per frame (~38)
         
-        # Store latest detections for rendering on frame
+        # Store latest detections for JSON sending
         self.latest_detections: List[Dict] = []
         
-        # Video encoder (NVENC > libx264 > JPEG)
-        self.encoder: BaseEncoder = create_encoder(
-            width=video_width,
-            height=self.video_height,  # Use calculated height
-            fps=video_fps,
-            prefer_nvenc=True,
-            fallback_jpeg=True,
-        )
-        
-        # Track encoder globally for cleanup on exit
-        global _encoder_instance
-        _encoder_instance = self.encoder
+        # NO VIDEO ENCODER NEEDED - we send raw/zlib compressed strips
+        self.encoder = None
         
         # Inference buffer
         self.inference_buffer: List[TimestampedChunk] = []
@@ -657,32 +659,79 @@ class VideoStreamServer:
         self.is_running = False
         self.current_pts = 0.0
         
-        logger.info(f"VideoStreamServer initialized:")
-        logger.info(f"  Video: {self.video_width}x{self.video_height} @ {self.video_fps}fps")
-        logger.info(f"  Time span: {self.time_span_seconds}s ({self.video_height} rows)")
-        logger.info(f"  Encoder: {self.encoder.get_content_type()}")
+        # Row tracking for detection synchronization
+        self.total_rows_written = 0  # Monotonic counter, never resets
+        self.rows_this_frame = 0     # Rows added in current frame
+        
+        # Suggested buffer height for Flutter client
+        self.suggested_buffer_height = int(time_span_seconds * video_fps * self.rows_per_frame)
+        
+        logger.info(f"VideoStreamServer initialized (ROW-STRIP MODE):")
+        logger.info(f"  Strip size: {self.video_width}x{self.rows_per_frame} (~38 rows per frame)")
+        logger.info(f"  Suggested client buffer: {self.video_width}x{self.suggested_buffer_height}")
+        logger.info(f"  Time span hint: {self.time_span_seconds}s")
     
     async def send_metadata(self, websocket):
-        """Send stream metadata to client."""
+        """Send stream metadata to client - ROW-STRIP MODE."""
         metadata = {
             'type': 'metadata',
-            'video_width': self.video_width,
-            'video_height': self.video_height,
+            'mode': 'row_strip',  # Tell Flutter we're in strip mode
+            'strip_width': self.video_width,
+            'rows_per_strip': self.rows_per_frame,  # ~38 rows per message
             'video_fps': self.video_fps,
-            'encoder': self.encoder.get_content_type(),
+            'suggested_buffer_height': self.suggested_buffer_height,  # Client creates buffer this size
+            'time_span_seconds': self.time_span_seconds,
+            'encoder': 'rgba_raw',  # Raw RGBA pixels (no compression for simplicity)
         }
         await websocket.send(bytes([self.MSG_METADATA]) + json.dumps(metadata).encode())
-        logger.info(f"Sent metadata: {metadata}")
+        logger.info(f"Sent metadata (ROW-STRIP): {metadata}")
+    
+    def _db_to_rgba(self, db_rows: np.ndarray, target_width: int = 2048) -> np.ndarray:
+        """Convert dB values to RGBA pixels using viridis colormap."""
+        num_rows = db_rows.shape[0]
+        fft_size = db_rows.shape[1]
+        
+        # Resample to target width (max-pooling preserves peaks)
+        stride = fft_size // target_width
+        if stride > 1:
+            truncated_len = target_width * stride
+            # Take max of each group for all rows at once
+            db_resampled = db_rows[:, :truncated_len].reshape(num_rows, target_width, stride).max(axis=2)
+        else:
+            db_resampled = db_rows[:, :target_width]
+        
+        # Update noise floor tracking
+        current_median = np.median(db_resampled)
+        self.pipeline.noise_floor_db = (self.pipeline.noise_alpha * current_median + 
+                                         (1 - self.pipeline.noise_alpha) * self.pipeline.noise_floor_db)
+        
+        # Normalize to 0-255
+        min_db = self.pipeline.noise_floor_db - 5
+        max_db = self.pipeline.noise_floor_db + self.pipeline.waterfall_dynamic_range
+        normalized = np.clip((db_resampled - min_db) / (max_db - min_db + 1e-6), 0, 1)
+        indices = (normalized * 255).astype(np.uint8)
+        
+        # Apply colormap - shape (num_rows, target_width, 3)
+        rgb = VIRIDIS_LUT[indices]
+        
+        # Add alpha channel - shape (num_rows, target_width, 4)
+        rgba = np.zeros((num_rows, target_width, 4), dtype=np.uint8)
+        rgba[:, :, :3] = rgb
+        rgba[:, :, 3] = 255
+        
+        return rgba
     
     async def run_pipeline(self, websocket):
-        """Main video streaming loop."""
+        """Main row-strip streaming loop - sends strips instead of full frames."""
+        import zlib
+        
         self.is_running = True
         frame_count = 0
         
         # Send metadata first
         await self.send_metadata(websocket)
         
-        logger.info(f"Video pipeline started ({self.video_fps}fps)")
+        logger.info(f"Row-strip pipeline started ({self.video_fps}fps, ~{self.rows_per_frame} rows/frame)")
         
         frame_interval = 1.0 / self.video_fps
         
@@ -698,23 +747,38 @@ class VideoStreamServer:
                 
                 self.current_pts = chunk.pts
                 
-                # Compute STFT - get high-res spectrum, but add only 1 row per frame (real-time)
+                # Compute FFT rows (multiple rows per chunk)
                 db_rows = self.pipeline.compute_waterfall_rows(chunk.data)
-                if len(db_rows) > 0:
-                    # Average all rows for best SNR, or use last row
-                    avg_row = np.mean(db_rows, axis=0)
-                    self.waterfall_buffer.add_row(avg_row)
+                self.rows_this_frame = len(db_rows)
                 
-                # Get rendered frame WITH detection boxes burned in
-                rgb_frame = self.waterfall_buffer.get_frame_with_detections(self.latest_detections)
-                video_bytes = self.encoder.encode(rgb_frame)
-                
-                # Send video frame if we got output
-                if video_bytes:
-                    await websocket.send(bytes([self.MSG_VIDEO]) + video_bytes)
+                if self.rows_this_frame > 0:
+                    # Convert dB to RGBA pixels
+                    rgba_strip = self._db_to_rgba(db_rows, target_width=self.video_width)
+                    
+                    # Pack strip message: header + raw RGBA bytes
+                    # Header: 16 bytes
+                    #   - frame_id: uint32
+                    #   - total_rows: uint32 (monotonic counter)
+                    #   - rows_in_strip: uint16
+                    #   - strip_width: uint16
+                    #   - pts: float32
+                    header = struct.pack('<I I H H f',
+                        frame_count,
+                        self.total_rows_written,
+                        self.rows_this_frame,
+                        self.video_width,
+                        self.current_pts
+                    )
+                    
+                    # Send strip: MSG_STRIP + header + RGBA bytes
+                    strip_bytes = rgba_strip.tobytes()
+                    await websocket.send(bytes([self.MSG_STRIP]) + header + strip_bytes)
+                    
+                    # Update row counter AFTER sending
+                    self.total_rows_written += self.rows_this_frame
                     
                     if frame_count % 30 == 0:
-                        logger.info(f"[VIDEO] Frame {frame_count}: {len(video_bytes)} bytes, PTS={chunk.pts:.3f}s")
+                        logger.info(f"[STRIP] Frame {frame_count}: {self.rows_this_frame} rows, {len(strip_bytes)} bytes, total_rows={self.total_rows_written}")
                 
                 # Run inference every N frames
                 self.inference_buffer.append(chunk)
@@ -737,13 +801,12 @@ class VideoStreamServer:
                 await asyncio.sleep(sleep_time)
                 
             except Exception as e:
-                logger.error(f"Video pipeline error: {e}")
+                logger.error(f"Strip pipeline error: {e}")
                 import traceback
                 traceback.print_exc()
                 break
         
-        self.encoder.close()
-        logger.info(f"Video pipeline stopped after {frame_count} frames")
+        logger.info(f"Strip pipeline stopped after {frame_count} frames, {self.total_rows_written} total rows")
     
     async def _run_inference_sync(self, websocket, iq_data, pts, frame_id):
         """Run inference SYNCHRONOUSLY (CUDA is not thread-safe with asyncio.to_thread)."""
@@ -777,20 +840,29 @@ class VideoStreamServer:
             logger.error(f"[INFERENCE ERROR] Frame {frame_id}: {e}")
     
     async def _run_inference_async(self, websocket, iq_data, pts, frame_id):
-        """Run inference in background thread with timeout (DEPRECATED - CUDA not thread-safe)."""
+        """Run inference in background thread with timeout."""
         try:
+            # Capture row state BEFORE inference (inference may take time)
+            base_row = self.total_rows_written
+            rows_in_frame = self.rows_this_frame if self.rows_this_frame > 0 else 38  # Default estimate
+            
             # Add 30 second timeout to detect if inference is hanging
             result = await asyncio.wait_for(
                 asyncio.to_thread(self.pipeline.process_chunk, iq_data, pts),
                 timeout=30.0
             )
             
+            # Build detection list WITH ROW OFFSET for perfect sync
+            # Detection x1/x2 is time axis (0-1), maps to row_offset within frame
             det_list = [{
                 'detection_id': d.box_id,
                 'x1': d.x1, 'y1': d.y1, 'x2': d.x2, 'y2': d.y2,
                 'confidence': d.confidence,
                 'class_id': d.class_id,
                 'class_name': d.class_name,
+                # ROW SYNC: x1 is time position (0-1), maps to row within frame
+                'row_offset': int(d.x1 * rows_in_frame),
+                'row_span': max(1, int((d.x2 - d.x1) * rows_in_frame)),
             } for d in result['detections']]
             
             # STORE DETECTIONS for rendering on video frame
@@ -801,6 +873,9 @@ class VideoStreamServer:
                 'frame_id': frame_id,
                 'pts': result['pts'],
                 'inference_ms': result['inference_ms'],
+                # ROW SYNC: Send row tracking info for Flutter positioning
+                'base_row': base_row,
+                'rows_in_frame': rows_in_frame,
                 'detections': det_list,
             })
             
@@ -814,7 +889,7 @@ class VideoStreamServer:
         """Stop the pipeline."""
         self.is_running = False
         self.iq_source.close()
-        self.encoder.close()
+        # No encoder in row-strip mode
 
 
 async def video_ws_handler(websocket, iq_file: str, model_path: str):
@@ -860,66 +935,36 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
                 elif cmd == 'set_time_span':
                     try:
                         seconds = float(data.get('seconds', 5.0))
-                        new_height = max(30, min(900, int(seconds * 30)))  # 1s-30s, 30fps
+                        # ROW-STRIP MODE: Flutter manages buffer, just update suggested size
+                        new_suggested_height = int(seconds * server.video_fps * server.rows_per_frame)
                         
-                        print(f"[Pipeline] Time span changing: {server.time_span_seconds}s -> {seconds}s ({new_height} rows)", flush=True)
+                        print(f"[Pipeline] Time span changing: {server.time_span_seconds}s -> {seconds}s (suggested buffer: {new_suggested_height} rows)", flush=True)
                         
-                        # 1. Recreate waterfall buffer with new height
-                        print(f"[Pipeline] Step 1: Creating new WaterfallBuffer...", flush=True)
-                        server.waterfall_buffer = WaterfallBuffer(
-                            width=server.video_width,
-                            height=new_height,
-                            dynamic_range_db=80.0,
-                            colormap='viridis',
-                        )
-                        print(f"[Pipeline] Step 1: WaterfallBuffer created", flush=True)
-                        
-                        # 2. Close old encoder
-                        print(f"[Pipeline] Step 2: Closing old encoder...", flush=True)
-                        server.encoder.close()
-                        print(f"[Pipeline] Step 2: Old encoder closed", flush=True)
-                        
-                        # 3. Create new encoder with new dimensions
-                        print(f"[Pipeline] Step 3: Creating new encoder ({server.video_width}x{new_height})...", flush=True)
-                        server.encoder = create_encoder(
-                            width=server.video_width,
-                            height=new_height,
-                            fps=server.video_fps,
-                            prefer_nvenc=True,
-                            fallback_jpeg=True,
-                        )
-                        print(f"[Pipeline] Step 3: New encoder created ({server.encoder.get_content_type()})", flush=True)
-                        
-                        # 4. Update server state
+                        # Update server state
                         server.time_span_seconds = seconds
-                        server.video_height = new_height
+                        server.suggested_buffer_height = new_suggested_height
                         
-                        # 5. Track encoder for cleanup
-                        global _encoder_instance
-                        _encoder_instance = server.encoder
-                        
-                        print(f"[Pipeline] Step 4: State updated, time span={seconds}s, height={new_height}", flush=True)
-                        
-                        # 6. Send updated metadata to client
-                        print(f"[Pipeline] Step 5: Sending metadata...", flush=True)
+                        # Send updated metadata to client - Flutter will resize its buffer
                         metadata = {
                             'type': 'metadata',
-                            'video_width': server.video_width,
-                            'video_height': new_height,
+                            'mode': 'row_strip',
+                            'strip_width': server.video_width,
+                            'rows_per_strip': server.rows_per_frame,
                             'video_fps': server.video_fps,
-                            'encoder': server.encoder.get_content_type(),
+                            'suggested_buffer_height': new_suggested_height,
+                            'time_span_seconds': seconds,
+                            'encoder': 'rgba_raw',
                         }
                         await websocket.send(bytes([server.MSG_METADATA]) + json.dumps(metadata).encode())
-                        print(f"[Pipeline] Step 5: Metadata sent", flush=True)
+                        print(f"[Pipeline] Metadata sent - Flutter should resize buffer to {new_suggested_height} rows", flush=True)
                         
-                        # 7. Send acknowledgment
-                        print(f"[Pipeline] Step 6: Sending ack...", flush=True)
+                        # Send acknowledgment
                         await websocket.send(json.dumps({
                             'type': 'time_span_ack',
                             'seconds': seconds,
-                            'rows': new_height,
+                            'suggested_buffer_height': new_suggested_height,
                         }))
-                        print(f"[Pipeline] Step 6: Ack sent - COMPLETE!", flush=True)
+                        print(f"[Pipeline] Ack sent - COMPLETE!", flush=True)
                         
                     except Exception as e:
                         print(f"[Pipeline] ERROR in set_time_span: {e}", flush=True)

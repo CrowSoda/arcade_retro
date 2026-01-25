@@ -19,6 +19,9 @@ import uuid
 import asyncio
 import logging
 import hashlib
+import signal
+import threading
+import atexit
 from pathlib import Path
 from concurrent import futures
 from typing import Dict, Optional, List, Any
@@ -26,6 +29,120 @@ from dataclasses import dataclass, field
 
 import grpc
 import numpy as np
+
+# ============= Global Shutdown Coordination =============
+# Threading event for cross-thread shutdown signaling
+_shutdown_event = threading.Event()
+# Asyncio event for async code (created per event loop)
+_async_shutdown_event: Optional[asyncio.Event] = None
+# Track all resources that need cleanup
+_cleanup_resources: List[Any] = []
+# Parent process ID (for orphan detection)
+_parent_pid: Optional[int] = None
+
+def _register_cleanup(resource):
+    """Register a resource for cleanup on shutdown."""
+    _cleanup_resources.append(resource)
+
+
+# ============= Parent Process Watchdog =============
+def _is_parent_alive() -> bool:
+    """Check if the parent process is still running."""
+    if _parent_pid is None:
+        return True  # No parent tracking, assume alive
+    
+    if sys.platform == 'win32':
+        # Windows: Use ctypes to check if process exists
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, _parent_pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        # Unix: Check if process exists
+        try:
+            os.kill(_parent_pid, 0)  # Signal 0 = check if process exists
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+
+def _parent_watchdog_thread():
+    """Background thread that monitors parent process and triggers shutdown if parent dies."""
+    print(f"[Watchdog] Started monitoring parent PID: {_parent_pid}", flush=True)
+    
+    while not _shutdown_event.is_set():
+        if not _is_parent_alive():
+            print(f"[Watchdog] Parent process {_parent_pid} is GONE! Initiating shutdown...", flush=True)
+            _shutdown_event.set()
+            if _async_shutdown_event:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.call_soon_threadsafe(_async_shutdown_event.set)
+                except RuntimeError:
+                    pass
+            break
+        
+        # Check every 2 seconds
+        _shutdown_event.wait(timeout=2.0)
+    
+    print("[Watchdog] Stopped", flush=True)
+
+
+def start_parent_watchdog():
+    """Start the parent process watchdog thread."""
+    global _parent_pid
+    _parent_pid = os.getppid()
+    
+    # Don't monitor if parent is init (PID 1) or system process
+    if _parent_pid <= 1:
+        print(f"[Watchdog] Parent PID is {_parent_pid}, not monitoring", flush=True)
+        return
+    
+    watchdog = threading.Thread(target=_parent_watchdog_thread, daemon=True, name="ParentWatchdog")
+    watchdog.start()
+
+def _cleanup_all():
+    """Clean up all registered resources."""
+    print("[Shutdown] Cleaning up resources...", flush=True)
+    for resource in _cleanup_resources:
+        try:
+            if hasattr(resource, 'close'):
+                resource.close()
+            elif hasattr(resource, 'stop'):
+                resource.stop()
+        except Exception as e:
+            print(f"[Shutdown] Cleanup error: {e}", flush=True)
+    _cleanup_resources.clear()
+    print("[Shutdown] Cleanup complete", flush=True)
+
+def _signal_handler(signum, frame):
+    """Handle shutdown signals (SIGINT, SIGTERM, SIGBREAK)."""
+    sig_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+    print(f"\n[Shutdown] Received {sig_name}, initiating graceful shutdown...", flush=True)
+    _shutdown_event.set()
+    if _async_shutdown_event:
+        # Schedule setting the async event from any thread
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(_async_shutdown_event.set)
+        except RuntimeError:
+            pass  # No running loop
+
+def setup_signal_handlers():
+    """Set up platform-appropriate signal handlers."""
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    if sys.platform == 'win32':
+        # Windows: SIGBREAK is sent on Ctrl+Break and by taskkill
+        signal.signal(signal.SIGBREAK, _signal_handler)
+    print("[Shutdown] Signal handlers registered", flush=True)
+
+# Register cleanup on exit
+atexit.register(_cleanup_all)
 
 # Add generated proto stubs to path
 GENERATED_DIR = Path(__file__).parent / "generated"
@@ -1133,7 +1250,11 @@ async def run_websocket_server(port: int = 0):
     
     If port=0, OS picks a free port and we print it for parent process to read.
     This is the professional KISS approach - no port conflicts ever.
+    
+    Uses _async_shutdown_event for graceful shutdown coordination.
     """
+    global _async_shutdown_event
+    
     try:
         import websockets
         print(f"[SERVER] websockets version: {websockets.__version__}", flush=True)
@@ -1141,6 +1262,14 @@ async def run_websocket_server(port: int = 0):
         print("[SERVER] ERROR: websockets package not found!", flush=True)
         return
     
+    # Create async shutdown event for this event loop
+    _async_shutdown_event = asyncio.Event()
+    
+    # If threading event is already set, set async event too
+    if _shutdown_event.is_set():
+        _async_shutdown_event.set()
+    
+    server = None
     try:
         # Let OS pick port if port=0, or use specified port
         # Use ws_router to dispatch based on path
@@ -1151,6 +1280,9 @@ async def run_websocket_server(port: int = 0):
             reuse_address=True
         )
         
+        # Register server for cleanup
+        _register_cleanup(server)
+        
         # Get the actual port (especially useful when port=0)
         actual_port = server.sockets[0].getsockname()[1]
         
@@ -1158,26 +1290,69 @@ async def run_websocket_server(port: int = 0):
         print(f"WS_PORT:{actual_port}", flush=True)
         print(f"[SERVER] WebSocket server READY on ws://127.0.0.1:{actual_port}", flush=True)
         
-        await asyncio.Future()  # Run forever
+        # Wait for shutdown signal instead of running forever
+        await _async_shutdown_event.wait()
+        print("[SERVER] Shutdown signal received, closing WebSocket server...", flush=True)
+        
     except OSError as e:
         print(f"[SERVER] ERROR: WebSocket failed to bind: {e}", flush=True)
         import traceback
         traceback.print_exc()
+    finally:
+        if server:
+            server.close()
+            await server.wait_closed()
+            print("[SERVER] WebSocket server closed", flush=True)
 
 
 def serve_both(grpc_port: int = 50051, ws_port: int = 50052, max_workers: int = 10):
-    """Start both gRPC and WebSocket servers."""
-    import threading
+    """Start both gRPC and WebSocket servers with coordinated shutdown."""
     
     print(f"[MAIN] serve_both called: gRPC={grpc_port}, WS={ws_port}", flush=True)
     
+    # Set up signal handlers first
+    setup_signal_handlers()
+    
+    # Start parent process watchdog - auto-exit if parent (Flutter) dies
+    start_parent_watchdog()
+    
+    grpc_server = None
+    
     # Start gRPC in a thread
     def run_grpc():
+        nonlocal grpc_server
         print(f"[MAIN] gRPC thread starting on port {grpc_port}...", flush=True)
-        if PROTO_AVAILABLE:
-            serve(port=grpc_port, max_workers=max_workers)
-        else:
+        if not PROTO_AVAILABLE:
             print("[MAIN] gRPC not available (proto stubs missing)", flush=True)
+            return
+        
+        grpc_server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=max_workers),
+            options=[
+                ('grpc.max_send_message_length', 50 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 50 * 1024 * 1024),
+            ]
+        )
+        
+        device_control = DeviceControlServicer()
+        inference_service = InferenceServicer(device_control)
+        
+        control_pb2_grpc.add_DeviceControlServicer_to_server(device_control, grpc_server)
+        inference_pb2_grpc.add_InferenceServiceServicer_to_server(inference_service, grpc_server)
+        
+        try:
+            grpc_server.add_insecure_port(f"0.0.0.0:{grpc_port}")
+            grpc_server.start()
+            logger.info(f"gRPC server started on port {grpc_port}")
+        except RuntimeError as e:
+            logger.warning(f"gRPC failed to bind port {grpc_port}: {e}")
+            return
+        
+        # Wait for shutdown signal
+        _shutdown_event.wait()
+        print("[MAIN] gRPC thread received shutdown signal, stopping...", flush=True)
+        grpc_server.stop(grace=5)
+        print("[MAIN] gRPC server stopped", flush=True)
     
     grpc_thread = threading.Thread(target=run_grpc, daemon=True)
     grpc_thread.start()
@@ -1187,7 +1362,19 @@ def serve_both(grpc_port: int = 50051, ws_port: int = 50052, max_workers: int = 
     try:
         asyncio.run(run_websocket_server(ws_port))
     except KeyboardInterrupt:
-        print("[MAIN] Shutting down...", flush=True)
+        print("[MAIN] KeyboardInterrupt received", flush=True)
+    finally:
+        print("[MAIN] Triggering shutdown...", flush=True)
+        _shutdown_event.set()
+        
+        # Wait for gRPC thread to finish
+        grpc_thread.join(timeout=10)
+        if grpc_thread.is_alive():
+            print("[MAIN] Warning: gRPC thread did not stop gracefully", flush=True)
+        
+        # Final cleanup
+        _cleanup_all()
+        print("[MAIN] Shutdown complete", flush=True)
 
 
 if __name__ == "__main__":

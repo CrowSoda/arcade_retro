@@ -50,6 +50,7 @@ class NVENCEncoder(BaseEncoder):
         self.fps = fps
         self.bitrate = bitrate
         self.process: Optional[subprocess.Popen] = None
+        self._closed = False
         self._start_encoder()
     
     def _start_encoder(self):
@@ -147,22 +148,50 @@ class NVENCEncoder(BaseEncoder):
         return 'video/h264'
     
     def close(self):
-        if self.process:
+        """Clean up encoder - kill FFmpeg process tree on Windows."""
+        if self._closed:
+            return
+        self._closed = True
+        
+        if self.process and self.process.poll() is None:
+            pid = self.process.pid
+            print(f"[NVENCEncoder] Closing FFmpeg process PID={pid}...", flush=True)
+            
             try:
                 self.process.stdin.close()
-            except:
+            except Exception:
                 pass
-            try:
-                self.process.terminate()
-                self.process.wait(timeout=2)
-            except:
-                pass
-            try:
-                self.process.kill()
-            except:
-                pass
+            
+            if os.name == 'nt':
+                # Windows: Kill entire process tree to avoid orphans
+                try:
+                    subprocess.run(
+                        ['taskkill', '/F', '/T', '/PID', str(pid)],
+                        capture_output=True,
+                        timeout=5
+                    )
+                except Exception as e:
+                    print(f"[NVENCEncoder] taskkill failed: {e}", flush=True)
+            else:
+                # Unix: SIGTERM then SIGKILL
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+                except Exception:
+                    pass
+            
             self.process = None
         print("[NVENCEncoder] Closed", flush=True)
+    
+    def __del__(self):
+        """Destructor - ensure cleanup on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class LibX264Encoder(BaseEncoder):
@@ -177,6 +206,7 @@ class LibX264Encoder(BaseEncoder):
         self.fps = fps
         self.bitrate = bitrate
         self.process: Optional[subprocess.Popen] = None
+        self._closed = False
         self._start_encoder()
     
     def _start_encoder(self):
@@ -260,14 +290,50 @@ class LibX264Encoder(BaseEncoder):
         return 'video/h264'
     
     def close(self):
-        if self.process:
+        """Clean up encoder - kill FFmpeg process tree on Windows."""
+        if self._closed:
+            return
+        self._closed = True
+        
+        if self.process and self.process.poll() is None:
+            pid = self.process.pid
+            print(f"[LibX264Encoder] Closing FFmpeg process PID={pid}...", flush=True)
+            
             try:
                 self.process.stdin.close()
-                self.process.terminate()
-                self.process.wait(timeout=5)
-            except Exception as e:
-                print(f"[LibX264Encoder] Error closing: {e}")
-            print("[LibX264Encoder] Closed")
+            except Exception:
+                pass
+            
+            if os.name == 'nt':
+                # Windows: Kill entire process tree to avoid orphans
+                try:
+                    subprocess.run(
+                        ['taskkill', '/F', '/T', '/PID', str(pid)],
+                        capture_output=True,
+                        timeout=5
+                    )
+                except Exception as e:
+                    print(f"[LibX264Encoder] taskkill failed: {e}", flush=True)
+            else:
+                # Unix: SIGTERM then SIGKILL
+                try:
+                    self.process.terminate()
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+                except Exception:
+                    pass
+            
+            self.process = None
+        print("[LibX264Encoder] Closed", flush=True)
+    
+    def __del__(self):
+        """Destructor - ensure cleanup on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class JPEGEncoder(BaseEncoder):

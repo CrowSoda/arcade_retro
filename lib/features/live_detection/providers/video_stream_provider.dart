@@ -1,6 +1,7 @@
 // lib/features/live_detection/providers/video_stream_provider.dart
-/// Video stream provider for H.264/JPEG waterfall streaming
-/// Handles WebSocket connection and message parsing
+/// Row-strip streaming provider for waterfall display
+/// Receives RGBA row strips from backend and stitches into local pixel buffer
+/// Handles detection overlays with row-index based positioning
 
 import 'dart:async';
 import 'dart:convert';
@@ -11,42 +12,54 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Message types from backend (must match unified_pipeline.py)
 class MessageType {
-  static const int videoFrame = 0x01;
-  static const int detection = 0x02;
-  static const int metadata = 0x03;
+  static const int strip = 0x01;      // Row strip data
+  static const int detection = 0x02;  // Detection JSON
+  static const int metadata = 0x03;   // Stream metadata
+  
+  // Alias for compatibility
+  static const int videoFrame = strip;
 }
 
-/// Metadata about the video stream
+/// Metadata about the stream
 class StreamMetadata {
-  final int videoWidth;
-  final int videoHeight;
-  final int videoFps;
-  final String encoder; // 'video/h264' or 'image/jpeg'
+  final String mode;           // 'row_strip' or 'video'
+  final int stripWidth;        // Width of each strip (2048)
+  final int rowsPerStrip;      // Rows per strip (~38)
+  final int videoFps;          // Target FPS (30)
+  final int suggestedBufferHeight;  // How many rows client should buffer
+  final double timeSpanSeconds;     // Current time span
+  final String encoder;        // 'rgba_raw' or 'image/jpeg'
 
   StreamMetadata({
-    required this.videoWidth,
-    required this.videoHeight,
+    required this.mode,
+    required this.stripWidth,
+    required this.rowsPerStrip,
     required this.videoFps,
+    required this.suggestedBufferHeight,
+    required this.timeSpanSeconds,
     required this.encoder,
   });
 
   factory StreamMetadata.fromJson(Map<String, dynamic> json) {
     return StreamMetadata(
-      videoWidth: json['video_width'] ?? 2048,
-      videoHeight: json['video_height'] ?? 1024,
+      mode: json['mode'] ?? 'video',
+      stripWidth: json['strip_width'] ?? json['video_width'] ?? 2048,
+      rowsPerStrip: json['rows_per_strip'] ?? 38,
       videoFps: json['video_fps'] ?? 30,
-      encoder: json['encoder'] ?? 'image/jpeg',
+      suggestedBufferHeight: json['suggested_buffer_height'] ?? 5700,
+      timeSpanSeconds: (json['time_span_seconds'] ?? 5.0).toDouble(),
+      encoder: json['encoder'] ?? 'rgba_raw',
     );
   }
 
-  bool get isH264 => encoder == 'video/h264';
+  bool get isRowStripMode => mode == 'row_strip';
   bool get isJpeg => encoder == 'image/jpeg';
   
   @override
-  String toString() => 'StreamMetadata($videoWidth×$videoHeight @$videoFps fps, $encoder)';
+  String toString() => 'StreamMetadata(mode=$mode, ${stripWidth}×$rowsPerStrip strips, buffer=$suggestedBufferHeight)';
 }
 
-/// Detection from inference
+/// Detection from inference with ROW-BASED positioning
 class VideoDetection {
   final int detectionId;
   final double x1, y1, x2, y2;
@@ -55,6 +68,8 @@ class VideoDetection {
   final String className;
   final double pts;
   final bool isSelected;
+  final int absoluteRow;  // Absolute row index when detection was made
+  final int rowSpan;      // Number of rows detection spans
 
   VideoDetection({
     required this.detectionId,
@@ -67,9 +82,14 @@ class VideoDetection {
     required this.className,
     required this.pts,
     this.isSelected = false,
+    this.absoluteRow = 0,
+    this.rowSpan = 1,
   });
 
-  factory VideoDetection.fromJson(Map<String, dynamic> json, double pts) {
+  factory VideoDetection.fromJson(Map<String, dynamic> json, double pts, {int baseRow = 0, int rowsInFrame = 38}) {
+    final rowOffset = json['row_offset'] as int? ?? 0;
+    final rowSpan = json['row_span'] as int? ?? 1;
+    
     return VideoDetection(
       detectionId: json['detection_id'] ?? 0,
       x1: (json['x1'] ?? 0).toDouble(),
@@ -80,6 +100,8 @@ class VideoDetection {
       classId: json['class_id'] ?? 0,
       className: json['class_name'] ?? 'unknown',
       pts: pts,
+      absoluteRow: baseRow + rowOffset,
+      rowSpan: rowSpan > 0 ? rowSpan : 1,
     );
   }
   
@@ -92,55 +114,84 @@ class VideoDetection {
       className: className,
       pts: pts,
       isSelected: isSelected ?? this.isSelected,
+      absoluteRow: absoluteRow,
+      rowSpan: rowSpan,
     );
   }
 }
 
-/// State for the video stream
+/// State for the row-strip stream
 class VideoStreamState {
   final bool isConnected;
   final bool isConnecting;
   final StreamMetadata? metadata;
-  final Uint8List? currentFrame; // JPEG bytes (for JPEG mode)
+  
+  // ROW-STRIP MODE: Local pixel buffer maintained by Flutter
+  final Uint8List? pixelBuffer;  // RGBA pixel buffer (width × bufferHeight × 4)
+  final int bufferWidth;         // Width of pixel buffer (2048)
+  final int bufferHeight;        // Height of pixel buffer (suggested by backend)
+  
+  // LEGACY: For JPEG/video mode compatibility
+  final Uint8List? currentFrame;
+  
   final List<VideoDetection> detections;
   final double currentPts;
   final int frameCount;
   final String? error;
-  final double fps; // Measured FPS
+  final double fps;
+  
+  // ROW SYNC: Row-based tracking
+  final int totalRowsReceived;  // Monotonic counter
+  final int rowsPerStrip;       // Rows per strip (~38)
 
   const VideoStreamState({
     this.isConnected = false,
     this.isConnecting = false,
     this.metadata,
+    this.pixelBuffer,
+    this.bufferWidth = 2048,
+    this.bufferHeight = 5700,
     this.currentFrame,
     this.detections = const [],
     this.currentPts = 0.0,
     this.frameCount = 0,
     this.error,
     this.fps = 0.0,
+    this.totalRowsReceived = 0,
+    this.rowsPerStrip = 38,
   });
 
   VideoStreamState copyWith({
     bool? isConnected,
     bool? isConnecting,
     StreamMetadata? metadata,
+    Uint8List? pixelBuffer,
+    int? bufferWidth,
+    int? bufferHeight,
     Uint8List? currentFrame,
     List<VideoDetection>? detections,
     double? currentPts,
     int? frameCount,
     String? error,
     double? fps,
+    int? totalRowsReceived,
+    int? rowsPerStrip,
   }) {
     return VideoStreamState(
       isConnected: isConnected ?? this.isConnected,
       isConnecting: isConnecting ?? this.isConnecting,
       metadata: metadata ?? this.metadata,
+      pixelBuffer: pixelBuffer ?? this.pixelBuffer,
+      bufferWidth: bufferWidth ?? this.bufferWidth,
+      bufferHeight: bufferHeight ?? this.bufferHeight,
       currentFrame: currentFrame ?? this.currentFrame,
       detections: detections ?? this.detections,
       currentPts: currentPts ?? this.currentPts,
       frameCount: frameCount ?? this.frameCount,
       error: error,
       fps: fps ?? this.fps,
+      totalRowsReceived: totalRowsReceived ?? this.totalRowsReceived,
+      rowsPerStrip: rowsPerStrip ?? this.rowsPerStrip,
     );
   }
   
@@ -150,29 +201,60 @@ class VideoStreamState {
 /// Callback type for forwarding detections
 typedef DetectionCallback = void Function(List<VideoDetection> detections, double pts);
 
-/// Provider for video stream state
+/// Provider for row-strip video stream
 class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   DetectionCallback? _onDetections;
+  
+  // Local pixel buffer for stitching strips
+  Uint8List? _pixelBuffer;
+  int _bufferWidth = 2048;
+  int _bufferHeight = 5700;  // Default: 5s × 30fps × 38 rows
+  static const int _bytesPerPixel = 4;  // RGBA
   
   // FPS calculation
   DateTime? _lastFrameTime;
   int _fpsFrameCount = 0;
   double _measuredFps = 0.0;
   
-  // Detection accumulator - keeps detections for timeSpan seconds
+  // Detection buffer
   List<VideoDetection> _detectionBuffer = [];
-  double _currentTimeSpan = 5.0;  // Default 5 seconds
+  double _currentTimeSpan = 5.0;
   
   VideoStreamNotifier() : super(VideoStreamState.initial());
   
-  /// Set callback for when detections are received
   void setDetectionCallback(DetectionCallback callback) {
     _onDetections = callback;
   }
 
-  /// Connect to the backend WebSocket (video endpoint)
+  /// Initialize or resize pixel buffer
+  void _initPixelBuffer(int width, int height) {
+    if (_pixelBuffer != null && _bufferWidth == width && _bufferHeight == height) {
+      return;  // Already correct size
+    }
+    
+    debugPrint('[VideoStream] Initializing pixel buffer: ${width}×$height (${(width * height * _bytesPerPixel / 1024 / 1024).toStringAsFixed(1)} MB)');
+    
+    _bufferWidth = width;
+    _bufferHeight = height;
+    _pixelBuffer = Uint8List(width * height * _bytesPerPixel);
+    
+    // Initialize with viridis dark purple (68, 1, 84, 255)
+    for (int i = 0; i < _pixelBuffer!.length; i += _bytesPerPixel) {
+      _pixelBuffer![i] = 68;      // R
+      _pixelBuffer![i + 1] = 1;   // G
+      _pixelBuffer![i + 2] = 84;  // B
+      _pixelBuffer![i + 3] = 255; // A
+    }
+    
+    state = state.copyWith(
+      pixelBuffer: _pixelBuffer,
+      bufferWidth: width,
+      bufferHeight: height,
+    );
+  }
+
   Future<void> connect(String host, int port) async {
     if (state.isConnected || state.isConnecting) {
       debugPrint('[VideoStream] Already connected or connecting');
@@ -195,9 +277,6 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
       state = state.copyWith(isConnected: true, isConnecting: false);
       debugPrint('[VideoStream] Connected!');
-      
-      // Note: Initial time span will be sent by the listener in video_waterfall_display.dart
-      // when the widget rebuilds after connection state changes
     } catch (e) {
       debugPrint('[VideoStream] Connection error: $e');
       state = state.copyWith(
@@ -208,13 +287,13 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     }
   }
 
-  /// Disconnect from the backend
   void disconnect() {
     debugPrint('[VideoStream] Disconnecting...');
     _subscription?.cancel();
     _subscription = null;
     _channel?.sink.close();
     _channel = null;
+    _pixelBuffer = null;
     state = VideoStreamState.initial();
   }
 
@@ -231,8 +310,8 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     final payload = bytes.sublist(1);
 
     switch (messageType) {
-      case MessageType.videoFrame:
-        _handleVideoFrame(payload);
+      case MessageType.strip:
+        _handleStrip(payload);
         break;
       case MessageType.detection:
         _handleDetection(payload);
@@ -245,7 +324,41 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     }
   }
 
-  void _handleVideoFrame(Uint8List frameData) {
+  /// Handle row strip - scroll buffer and paste new rows at bottom
+  void _handleStrip(Uint8List data) {
+    // Parse binary header (16 bytes):
+    // - frame_id: uint32 (4 bytes)
+    // - total_rows: uint32 (4 bytes)
+    // - rows_in_strip: uint16 (2 bytes)
+    // - strip_width: uint16 (2 bytes)
+    // - pts: float32 (4 bytes)
+    
+    if (data.length < 16) {
+      debugPrint('[VideoStream] Strip too short: ${data.length} bytes');
+      return;
+    }
+    
+    final header = ByteData.sublistView(data, 0, 16);
+    // final frameId = header.getUint32(0, Endian.little);
+    final totalRows = header.getUint32(4, Endian.little);
+    final rowsInStrip = header.getUint16(8, Endian.little);
+    final stripWidth = header.getUint16(10, Endian.little);
+    final pts = header.getFloat32(12, Endian.little);
+    
+    // Extract RGBA pixel data
+    final expectedBytes = rowsInStrip * stripWidth * _bytesPerPixel;
+    final pixelData = data.sublist(16);
+    
+    if (pixelData.length < expectedBytes) {
+      debugPrint('[VideoStream] Strip pixel data too short: ${pixelData.length} < $expectedBytes');
+      return;
+    }
+    
+    // Initialize buffer if needed
+    if (_pixelBuffer == null) {
+      _initPixelBuffer(stripWidth, state.metadata?.suggestedBufferHeight ?? 5700);
+    }
+    
     // Calculate FPS
     final now = DateTime.now();
     if (_lastFrameTime != null) {
@@ -260,26 +373,34 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       _lastFrameTime = now;
     }
     
-    // For JPEG mode, update the frame directly
-    // For H.264 mode, this would feed to a video player
-    if (state.metadata?.isJpeg == true) {
-      state = state.copyWith(
-        currentFrame: frameData,
-        frameCount: state.frameCount + 1,
-        fps: _measuredFps,
-      );
-    } else {
-      // H.264 mode - would need to feed to media_kit player
-      // For now, just track frame count
-      state = state.copyWith(
-        frameCount: state.frameCount + 1,
-        fps: _measuredFps,
-      );
+    // SCROLL: Move buffer up by rowsInStrip rows
+    final bytesPerRow = _bufferWidth * _bytesPerPixel;
+    final shiftBytes = rowsInStrip * bytesPerRow;
+    
+    if (shiftBytes < _pixelBuffer!.length) {
+      // Shift existing data up (oldest at top, newest at bottom)
+      _pixelBuffer!.setRange(0, _pixelBuffer!.length - shiftBytes, 
+          _pixelBuffer!.sublist(shiftBytes));
       
-      if (state.frameCount % 30 == 0) {
-        debugPrint('[VideoStream] H.264 frame ${state.frameCount}: ${frameData.length} bytes');
-      }
+      // PASTE: Copy new strip to bottom of buffer
+      final bottomStart = _pixelBuffer!.length - shiftBytes;
+      _pixelBuffer!.setRange(bottomStart, bottomStart + expectedBytes, pixelData);
     }
+    
+    // Cull old detections
+    final cutoffRow = totalRows - _bufferHeight;
+    _detectionBuffer = _detectionBuffer.where((d) => d.absoluteRow >= cutoffRow).toList();
+    
+    // Update state
+    state = state.copyWith(
+      pixelBuffer: _pixelBuffer,
+      frameCount: state.frameCount + 1,
+      fps: _measuredFps,
+      totalRowsReceived: totalRows + rowsInStrip,
+      rowsPerStrip: rowsInStrip,
+      currentPts: pts.toDouble(),
+      detections: List.from(_detectionBuffer),
+    );
   }
 
   void _handleDetection(Uint8List jsonData) {
@@ -290,25 +411,25 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       final pts = (data['pts'] ?? 0).toDouble();
       final detList = (data['detections'] as List<dynamic>?) ?? [];
       
+      final baseRow = data['base_row'] as int? ?? state.totalRowsReceived;
+      final rowsInFrame = data['rows_in_frame'] as int? ?? 38;
 
-      // Parse new detections from this message
       final newDetections = detList
-          .map((d) => VideoDetection.fromJson(d as Map<String, dynamic>, pts))
+          .map((d) => VideoDetection.fromJson(
+                d as Map<String, dynamic>,
+                pts,
+                baseRow: baseRow,
+                rowsInFrame: rowsInFrame,
+              ))
           .toList();
 
-      // Add new detections to buffer
       _detectionBuffer.addAll(newDetections);
       
-      // Prune old detections (older than timeSpan from current PTS)
-      final cutoffPts = pts - _currentTimeSpan;
-      _detectionBuffer = _detectionBuffer.where((d) => d.pts >= cutoffPts).toList();
-
       state = state.copyWith(
-        detections: List.from(_detectionBuffer),  // Expose full buffer
+        detections: List.from(_detectionBuffer),
         currentPts: pts,
       );
       
-      // Forward to callback (for detection_provider)
       if (_onDetections != null && newDetections.isNotEmpty) {
         _onDetections!(newDetections, pts);
       }
@@ -323,9 +444,17 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       final data = json.decode(jsonStr) as Map<String, dynamic>;
 
       final metadata = StreamMetadata.fromJson(data);
-      state = state.copyWith(metadata: metadata);
-
       debugPrint('[VideoStream] Metadata: $metadata');
+      
+      // ROW-STRIP MODE: Initialize pixel buffer with suggested size
+      if (metadata.isRowStripMode) {
+        _initPixelBuffer(metadata.stripWidth, metadata.suggestedBufferHeight);
+      }
+      
+      state = state.copyWith(
+        metadata: metadata,
+        rowsPerStrip: metadata.rowsPerStrip,
+      );
     } catch (e) {
       debugPrint('[VideoStream] Metadata parse error: $e');
     }
@@ -341,7 +470,6 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     state = state.copyWith(isConnected: false);
   }
   
-  /// Select a detection
   void selectDetection(int detectionId) {
     final newDetections = state.detections.map((d) {
       if (d.detectionId == detectionId) {
@@ -353,33 +481,20 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     state = state.copyWith(detections: newDetections);
   }
 
-  /// Send time span change to backend and update local buffer
-  /// This resizes the waterfall buffer on the backend to match Flutter's display setting
   void setTimeSpan(double seconds) {
-    debugPrint('[VideoStream] setTimeSpan CALLED with $seconds');
+    debugPrint('[VideoStream] setTimeSpan: $seconds');
     
     _currentTimeSpan = seconds;
     
-    // Prune detection buffer immediately to new time span
-    if (state.currentPts > 0) {
-      final cutoffPts = state.currentPts - _currentTimeSpan;
-      _detectionBuffer = _detectionBuffer.where((d) => d.pts >= cutoffPts).toList();
-      state = state.copyWith(detections: List.from(_detectionBuffer));
-    }
-    
     if (_channel == null) {
-      debugPrint('[VideoStream] Cannot set time span - _channel is NULL!');
+      debugPrint('[VideoStream] Cannot set time span - not connected');
       return;
     }
-    
-    debugPrint('[VideoStream] _channel is NOT null, proceeding to send');
     
     final msg = json.encode({
       'command': 'set_time_span',
       'seconds': seconds,
     });
-    
-    debugPrint('[VideoStream] About to send: $msg');
     
     try {
       _channel!.sink.add(msg);
@@ -404,5 +519,5 @@ final videoStreamProvider =
 
 /// Provider for connection URL configuration
 final videoStreamUrlProvider = StateProvider<({String host, int port})>(
-  (ref) => (host: 'localhost', port: 8765), // Same port as existing backend
+  (ref) => (host: 'localhost', port: 8765),
 );
