@@ -91,12 +91,23 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
       return;
     }
     
+    // Find heads to unload (in current but not in new)
+    final currentHeads = Set<String>.from(state.loadedHeads);
+    final newHeads = Set<String>.from(signals);
+    final toUnload = currentHeads.difference(newHeads).toList();
+    
+    if (toUnload.isNotEmpty) {
+      debugPrint('[MissionHeadLoader] Unloading old heads: $toUnload');
+      _ref.read(videoStreamProvider.notifier).unloadHeads(toUnload);
+    }
+    
     state = state.copyWith(
       requestedHeads: signals,
       isLoading: true,
     );
     
-    // Call video stream to load heads
+    // Call video stream to load new heads
+    debugPrint('[MissionHeadLoader] Loading heads: $signals');
     _ref.read(videoStreamProvider.notifier).loadHeads(signals);
     
     // Update state (actual loaded heads confirmed by backend response)

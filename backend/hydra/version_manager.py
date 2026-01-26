@@ -114,7 +114,8 @@ class VersionManager:
         weights_path = head_dir / f"v{new_version}.pth"
         torch.save(head_state_dict, weights_path)
         
-        # Create version entry
+        # Create version entry - handle None metrics gracefully
+        metrics = metrics or {}
         version_entry = {
             "version": new_version,
             "created_at": datetime.utcnow().isoformat() + "Z",
@@ -123,9 +124,9 @@ class VersionManager:
             "epochs_trained": epochs_trained,
             "early_stopped": early_stopped,
             "metrics": {
-                "f1_score": metrics.get("f1_score"),
-                "precision": metrics.get("precision"),
-                "recall": metrics.get("recall"),
+                "f1_score": metrics.get("f1_score", 0.0),
+                "precision": metrics.get("precision", 0.0),
+                "recall": metrics.get("recall", 0.0),
                 "val_loss": metrics.get("val_loss"),
                 "train_loss": metrics.get("train_loss"),
             },
@@ -162,7 +163,9 @@ class VersionManager:
         """
         metadata = self._load_head_metadata(signal_name)
         
-        new_f1 = new_metrics.get("f1_score", 0)
+        # Handle None metrics gracefully
+        new_metrics = new_metrics or {}
+        new_f1 = new_metrics.get("f1_score", 0) or 0
         
         # First version always promotes
         if not metadata["versions"] or metadata.get("active_version") is None:

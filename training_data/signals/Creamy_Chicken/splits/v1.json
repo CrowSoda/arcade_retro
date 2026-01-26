@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "created_at": "2026-01-26T19:47:46.865508Z",
+  "total_samples": 27,
+  "train_samples": [
+    "5ada26910d7d0865",
+    "56eadced0a706042",
+    "8c38ab8bf3ac7af8",
+    "975f1b046a3d1673",
+    "ea0f6dea2795850c",
+    "92ed916a1fb746dc",
+    "c29a0c4b4ca25b1b",
+    "1532338bb45255e6",
+    "95d66fc7714a5878",
+    "fb707964c2374c3b",
+    "9367f271c9aa9a66",
+    "2ba311d2ea682575",
+    "b58c55412a14e41f",
+    "fe57196d002a21c7",
+    "393c68911e0da97f",
+    "e9a1d5f2bf8b0416",
+    "5e8369894eb0b0b3",
+    "654335c8d6c08acb",
+    "f0a0b1b6ccd1cbff",
+    "03c00fa111a57cdc",
+    "2f579b6afe5323b9",
+    "ce2f020dfb5e9a92"
+  ],
+  "val_samples": [
+    "af361de360d7658f",
+    "92fee0e1f91763dd",
+    "8c30455cfaf307d3",
+    "fef2e1568a612434",
+    "c708f25689ed9425"
+  ],
+  "train_count": 22,
+  "val_count": 5,
+  "val_ratio": 0.18518518518518517,
+  "random_seed": 42,
+  "notes": "Initial 80/20 split"
+}

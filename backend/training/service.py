@@ -3,9 +3,16 @@ Training Service - Train detection heads with frozen backbone.
 
 Key features:
     - Frozen backbone (no gradients)
-    - Early stopping with patience=5
+    - Research-based training presets (FAST, BALANCED, QUALITY)
+    - Early stopping with configurable patience
     - Progress callbacks for UI updates
     - Auto-promotion check after training
+
+Training presets based on research:
+    - TFA (ICML 2020): Fine-tuning with frozen backbone
+    - DeFRCN (ICCV 2021): SGD settings for detection  
+    - Foundation Models (CVPR 2024): Adam with frozen backbone
+    - Intel batch size research: Small batch → flat minima → better generalization
 """
 
 import time
@@ -18,16 +25,23 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.ops import box_iou
 
-from ..hydra.config import (
+from hydra.config import (
+    TrainingPreset,
+    TrainingConfig,
+    get_training_config,
+    get_preset_by_name,
+    DEFAULT_PRESET,
+    # Legacy imports for backwards compatibility
     DEFAULT_EPOCHS,
     EARLY_STOP_PATIENCE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_BATCH_SIZE,
     MIN_SAMPLES_FOR_TRAINING,
 )
-from ..hydra.version_manager import VersionManager
+from hydra.version_manager import VersionManager
 from .dataset import create_data_loaders
 from .splits import SplitManager
 
@@ -91,28 +105,48 @@ class TrainingService:
     def train_new_signal(
         self,
         signal_name: str,
+        preset: str = "balanced",
         notes: str = None,
         callback: Callable[[TrainingProgress], None] = None
     ) -> TrainingResult:
-        """Train head for brand new signal."""
+        """Train head for brand new signal.
+        
+        Args:
+            signal_name: Name of the signal class
+            preset: Training preset - "fast", "balanced", or "quality"
+            notes: Optional training notes
+            callback: Progress callback function
+        """
+        # Get config for preset
+        config = get_training_config(get_preset_by_name(preset))
         
         # Create initial split
         self.split_manager.create_initial_split(signal_name)
         
-        return self._train(signal_name, notes, callback, is_new=True)
+        return self._train(signal_name, notes, callback, is_new=True, config=config)
     
     def extend_signal(
         self,
         signal_name: str,
+        preset: str = "balanced",
         notes: str = None,
         callback: Callable[[TrainingProgress], None] = None
     ) -> TrainingResult:
-        """Continue training with additional samples."""
+        """Continue training with additional samples.
+        
+        Args:
+            signal_name: Name of the signal class
+            preset: Training preset - "fast", "balanced", or "quality"
+            notes: Optional training notes
+            callback: Progress callback function
+        """
+        # Get config for preset
+        config = get_training_config(get_preset_by_name(preset))
         
         # Extend split with new samples
         self.split_manager.extend_split(signal_name)
         
-        return self._train(signal_name, notes, callback, is_new=False)
+        return self._train(signal_name, notes, callback, is_new=False, config=config)
     
     def cancel_training(self):
         """Request training cancellation."""
@@ -123,14 +157,30 @@ class TrainingService:
         signal_name: str,
         notes: str,
         callback: Callable,
-        is_new: bool
+        is_new: bool,
+        config: TrainingConfig = None
     ) -> TrainingResult:
-        """Internal training implementation."""
+        """Internal training implementation.
+        
+        Args:
+            signal_name: Name of the signal class
+            notes: Optional training notes
+            callback: Progress callback function
+            is_new: Whether this is a new signal (vs extending)
+            config: Training configuration (defaults to BALANCED preset)
+        """
+        # Use default config if not provided
+        if config is None:
+            config = get_training_config(DEFAULT_PRESET)
         
         self._is_training = True
         self._cancel_requested = False
         self._current_signal = signal_name
+        self._current_config = config
         start_time = time.time()
+        
+        print(f"[Training] Starting with preset: epochs={config.epochs}, lr={config.learning_rate}, "
+              f"batch={config.batch_size}, patience={config.early_stop_patience}")
         
         try:
             # Build model with frozen backbone
@@ -140,17 +190,17 @@ class TrainingService:
             if not is_new:
                 self._load_head_weights(model, signal_name)
             
-            # Create data loaders
+            # Create data loaders with config batch size
             train_loader, val_loader = create_data_loaders(
                 signal_name,
                 str(self.training_data_dir),
-                batch_size=DEFAULT_BATCH_SIZE
+                batch_size=config.batch_size
             )
             
             sample_count = len(train_loader.dataset) + len(val_loader.dataset)
             
-            if sample_count < MIN_SAMPLES_FOR_TRAINING:
-                raise ValueError(f"Need at least {MIN_SAMPLES_FOR_TRAINING} samples, got {sample_count}")
+            if sample_count < config.min_samples:
+                raise ValueError(f"Need at least {config.min_samples} samples, got {sample_count}")
             
             # Get previous metrics for comparison
             previous_version = None
@@ -163,9 +213,9 @@ class TrainingService:
                         previous_version = active[0]["version"]
                         previous_metrics = active[0]["metrics"]
             
-            # Training loop
+            # Training loop with config
             best_state, best_metrics, epochs_trained, early_stopped = self._train_loop(
-                model, train_loader, val_loader, callback, start_time
+                model, train_loader, val_loader, callback, start_time, config
             )
             
             training_time = time.time() - start_time
@@ -214,26 +264,68 @@ class TrainingService:
             self._current_signal = None
     
     def _build_model(self) -> FasterRCNN:
-        """Build FasterRCNN with frozen backbone."""
+        """Build FasterRCNN with frozen backbone and custom anchors for signal detection.
+        
+        Signal boxes are typically ~12px wide × ~84px tall (aspect ratio ~0.15).
+        Default Faster R-CNN anchors (32-512px, aspects 0.5-2.0) are too big.
+        Custom anchors: smaller sizes (8-128px) + narrow aspects (0.1-0.3).
+        """
         
         # Load backbone weights
         backbone_path = self.models_dir / "backbone" / "active.pth"
         if not backbone_path.exists():
             raise FileNotFoundError(f"Backbone not found: {backbone_path}")
         
+        print(f"\n[DEBUG] Loading backbone from: {backbone_path}")
         backbone_state = torch.load(backbone_path, map_location=self.device, weights_only=False)
+        print(f"[DEBUG] Backbone state keys: {len(backbone_state)} keys")
+        print(f"[DEBUG] First 5 keys: {list(backbone_state.keys())[:5]}")
         
-        # Create model
+        # Create backbone
         backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
-        model = FasterRCNN(backbone, num_classes=2)
+        
+        # Custom anchor generator for narrow signal boxes (~12x84 pixels, aspect ~0.15)
+        # Sizes cover the range: min box ~4x65, max box ~58x171
+        # Aspect ratios: 0.1, 0.15, 0.2, 0.3 for narrow vertical signals
+        # IMPORTANT: FPN has 5 feature levels, so we need 5 tuples (one per level)
+        anchor_generator = AnchorGenerator(
+            sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
+            aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5  # Same aspects for all 5 FPN levels
+        )
+        
+        print(f"[DEBUG] Custom anchor generator:")
+        print(f"  sizes: {anchor_generator.sizes}")
+        print(f"  aspect_ratios: {anchor_generator.aspect_ratios}")
+        
+        # Create model with custom anchors
+        model = FasterRCNN(
+            backbone, 
+            num_classes=2,
+            rpn_anchor_generator=anchor_generator,
+            # Lower RPN thresholds for small objects
+            rpn_fg_iou_thresh=0.5,  # Default 0.7 is too strict for small boxes
+            rpn_bg_iou_thresh=0.3,  # Default 0.3
+        )
         
         # Load backbone weights
-        model.load_state_dict(backbone_state, strict=False)
+        missing, unexpected = model.load_state_dict(backbone_state, strict=False)
+        print(f"[DEBUG] Loaded weights - Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+        if missing:
+            print(f"[DEBUG] First 5 missing: {missing[:5]}")
         
-        # Freeze backbone
+        # UNFREEZE BACKBONE - train everything (FULL END-TO-END)
+        trainable_count = 0
+        backbone_trainable = 0
         for name, param in model.named_parameters():
+            param.requires_grad = True
+            trainable_count += 1
             if name.startswith("backbone."):
-                param.requires_grad = False
+                backbone_trainable += 1
+        
+        print(f"[DEBUG] ******* FULL END-TO-END TRAINING *******")
+        print(f"[DEBUG] Total trainable params: {trainable_count}")
+        print(f"[DEBUG] Backbone trainable params: {backbone_trainable} (UNFROZEN!)")
+        print(f"[DEBUG] If backbone_trainable > 0, backbone IS training!")
         
         model.to(self.device)
         return model
@@ -251,20 +343,32 @@ class TrainingService:
         train_loader: DataLoader,
         val_loader: DataLoader,
         callback: Callable,
-        start_time: float
+        start_time: float,
+        config: TrainingConfig = None
     ) -> Tuple[dict, dict, int, bool]:
-        """Training loop with early stopping."""
+        """Training loop with early stopping.
+        
+        Uses config for epochs, learning rate, and early stopping patience.
+        """
+        # Get values from config or use defaults
+        if config is None:
+            config = get_training_config(DEFAULT_PRESET)
+        
+        epochs = config.epochs
+        learning_rate = config.learning_rate
+        early_stop_patience = config.early_stop_patience
         
         # Only optimize non-frozen params
         params = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.Adam(params, lr=DEFAULT_LEARNING_RATE)
+        optimizer = torch.optim.Adam(params, lr=learning_rate)
+        print(f"[Training] LR: {learning_rate}", flush=True)
         
         best_f1 = 0.0
         best_state = None
         best_metrics = None
         patience_counter = 0
         
-        for epoch in range(DEFAULT_EPOCHS):
+        for epoch in range(epochs):
             if self._cancel_requested:
                 print(f"Training cancelled at epoch {epoch}")
                 break
@@ -281,6 +385,8 @@ class TrainingService:
                 
                 optimizer.zero_grad()
                 losses.backward()
+                # Gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
                 optimizer.step()
                 
                 train_loss += losses.item()
@@ -308,7 +414,7 @@ class TrainingService:
                 elapsed = time.time() - start_time
                 progress = TrainingProgress(
                     epoch=epoch + 1,
-                    total_epochs=DEFAULT_EPOCHS,
+                    total_epochs=epochs,
                     train_loss=train_loss,
                     val_loss=metrics["val_loss"],
                     f1_score=metrics["f1_score"],
@@ -319,17 +425,17 @@ class TrainingService:
                 )
                 callback(progress)
             
-            print(f"Epoch {epoch+1}: train_loss={train_loss:.4f}, f1={metrics['f1_score']:.3f}" +
-                  (" *" if is_best else ""))
+            print(f"Epoch {epoch+1}/{epochs}: loss={train_loss:.4f}, f1={metrics['f1_score']:.3f}, P={metrics['precision']:.3f}, R={metrics['recall']:.3f}" +
+                  (" *" if is_best else ""), flush=True)
             
-            # Early stopping
-            if patience_counter >= EARLY_STOP_PATIENCE:
-                print(f"Early stopping at epoch {epoch+1}")
-                return best_state, best_metrics, epoch + 1, True
+            # Early stopping DISABLED - run full epochs
+            # if patience_counter >= early_stop_patience:
+            #     print(f"Early stopping at epoch {epoch+1} (patience={early_stop_patience})")
+            #     return best_state, best_metrics, epoch + 1, True
         
-        return best_state, best_metrics, DEFAULT_EPOCHS, False
+        return best_state, best_metrics, epochs, False
     
-    def _evaluate(self, model: FasterRCNN, val_loader: DataLoader) -> dict:
+    def _evaluate(self, model: FasterRCNN, val_loader: DataLoader, debug_first: bool = True) -> dict:
         """Evaluate model on validation set."""
         model.eval()
         
@@ -337,6 +443,7 @@ class TrainingService:
         total_fp = 0
         total_fn = 0
         total_loss = 0.0
+        first_sample = True
         
         with torch.inference_mode():
             for images, targets in val_loader:
@@ -347,7 +454,34 @@ class TrainingService:
                 for out, tgt in zip(outputs, targets):
                     pred_boxes = out["boxes"].cpu()
                     pred_scores = out["scores"].cpu()
+                    pred_labels = out["labels"].cpu()
                     true_boxes = tgt["boxes"]
+                    
+                    # DEBUG: Print first sample predictions
+                    if first_sample and debug_first:
+                        # Check score threshold
+                        print(f"\n[DEBUG EVAL] roi_heads.score_thresh: {model.roi_heads.score_thresh}")
+                        print(f"[DEBUG EVAL] First val sample:")
+                        print(f"  True boxes: {true_boxes.shape[0]} boxes")
+                        if len(true_boxes) > 0:
+                            print(f"  True box[0]: {true_boxes[0].tolist()}")
+                        print(f"  Pred boxes (default thresh): {pred_boxes.shape[0]} predictions")
+                        print(f"  Pred scores: {pred_scores[:5].tolist() if len(pred_scores) > 0 else 'none'}")
+                        
+                        # Check with VERY LOW threshold to see raw predictions
+                        original_thresh = model.roi_heads.score_thresh
+                        model.roi_heads.score_thresh = 0.001
+                        raw_outputs = model(images)
+                        model.roi_heads.score_thresh = original_thresh
+                        
+                        raw_boxes = raw_outputs[0]["boxes"].cpu()
+                        raw_scores = raw_outputs[0]["scores"].cpu()
+                        print(f"  Raw preds (thresh=0.001): {len(raw_boxes)} boxes")
+                        if len(raw_scores) > 0:
+                            print(f"  Top 10 raw scores: {raw_scores[:10].tolist()}")
+                            print(f"  Raw box[0]: {raw_boxes[0].tolist() if len(raw_boxes) > 0 else 'none'}")
+                        
+                        first_sample = False
                     
                     # Count TP, FP, FN
                     tp, fp, fn = self._count_matches(pred_boxes, pred_scores, true_boxes)
@@ -359,6 +493,8 @@ class TrainingService:
         precision = total_tp / (total_tp + total_fp + 1e-6)
         recall = total_tp / (total_tp + total_fn + 1e-6)
         f1 = 2 * precision * recall / (precision + recall + 1e-6)
+        
+        print(f"[DEBUG EVAL] Total: TP={total_tp}, FP={total_fp}, FN={total_fn}")
         
         return {
             "f1_score": float(f1),

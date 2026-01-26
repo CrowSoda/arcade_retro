@@ -1,0 +1,18 @@
+{
+  "signal_name": "Creamy_Pork",
+  "total_samples": 4332,
+  "sources": [
+    {
+      "capture_file": "C:\\Users\\Crowsoda\\CodingProjects\\g20_demo/data/captures\\MAN_110238ZJAN26_825MHZ_110238ZJAN26.rfcap",
+      "sample_count": 4282,
+      "added_at": "2026-01-26T13:08:57.457045Z"
+    },
+    {
+      "capture_file": "C:\\Users\\Crowsoda\\CodingProjects\\g20_demo/data/captures\\MAN_26012026_190556_819MHz.rfcap",
+      "sample_count": 50,
+      "added_at": "2026-01-26T19:18:00.106528Z"
+    }
+  ],
+  "created_at": "2026-01-26T13:08:57.457045Z",
+  "last_updated": "2026-01-26T19:18:47.883197Z"
+}

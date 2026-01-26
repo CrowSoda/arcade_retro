@@ -327,10 +327,39 @@ class _XAxisLabels extends StatelessWidget {
   static const _style = TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark);
 }
 
-// Debug counter for _DetectionOverlays
-int _psdDebugCounter = 0;
+/// Grouped detection band - merges overlapping detections per class
+class _DetectionBand {
+  final String className;
+  double y1;  // Min freq (normalized 0-1)
+  double y2;  // Max freq (normalized 0-1)
+  int count;  // Number of detections merged
+  bool isSelected;
 
-/// Detection frequency overlays on PSD chart - thick vertical bands with 20% padding
+  _DetectionBand({
+    required this.className,
+    required this.y1,
+    required this.y2,
+    this.count = 1,
+    this.isSelected = false,
+  });
+
+  /// Merge another detection into this band if overlapping
+  bool tryMerge(double otherY1, double otherY2, bool otherSelected) {
+    // Check if overlapping (with 10% tolerance for "close" detections)
+    final tolerance = 0.05;
+    if (otherY1 <= y2 + tolerance && otherY2 >= y1 - tolerance) {
+      y1 = y1 < otherY1 ? y1 : otherY1;  // min
+      y2 = y2 > otherY2 ? y2 : otherY2;  // max
+      count++;
+      if (otherSelected) isSelected = true;
+      return true;
+    }
+    return false;
+  }
+}
+
+/// Detection frequency overlays on PSD chart - IMPROVED for busy environments
+/// Groups overlapping detections per class, shows thin border markers instead of filled bands
 class _DetectionOverlays extends ConsumerWidget {
   final List<Detection> detections;
   final double centerFreqMHz;
@@ -363,48 +392,87 @@ class _DetectionOverlays extends ConsumerWidget {
 
     if (visibleDetections.isEmpty) return const SizedBox.shrink();
 
-    _psdDebugCounter++;
+    // GROUP DETECTIONS BY CLASS AND MERGE OVERLAPPING FREQUENCY RANGES
+    // This dramatically reduces visual clutter in busy environments
+    final bandsByClass = <String, List<_DetectionBand>>{};
 
-    return Stack(
-      clipBehavior: Clip.none,
-      children: visibleDetections.map((det) {
-        // Check visibility toggle
-        final isVisible = ref.watch(soiVisibilityProvider(det.className));
-        if (!isVisible) return const SizedBox.shrink();
+    for (final det in visibleDetections) {
+      // Check visibility toggle
+      final isVisible = ref.watch(soiVisibilityProvider(det.className));
+      if (!isVisible) continue;
 
-        // y1/y2 = frequency position (horizontal) with 20% padding
-        // NOTE: Frequency axis is FLIPPED (1.0 - y) to match waterfall display
-        final detWidth = det.y2 - det.y1;
-        final freqPadding = detWidth * 0.2;  // 20% padding each side
-        final paddedY1 = (det.y1 - freqPadding).clamp(0.0, 1.0);
-        final paddedY2 = (det.y2 + freqPadding).clamp(0.0, 1.0);
+      final bands = bandsByClass.putIfAbsent(det.className, () => []);
+      
+      // Try to merge with existing band
+      bool merged = false;
+      for (final band in bands) {
+        if (band.tryMerge(det.y1, det.y2, det.isSelected)) {
+          merged = true;
+          break;
+        }
+      }
+      
+      // No overlap found - create new band
+      if (!merged) {
+        bands.add(_DetectionBand(
+          className: det.className,
+          y1: det.y1,
+          y2: det.y2,
+          isSelected: det.isSelected,
+        ));
+      }
+    }
+
+    // Build widgets for each merged band
+    final widgets = <Widget>[];
+
+    for (final entry in bandsByClass.entries) {
+      final className = entry.key;
+      final color = getSOIColor(className);
+      
+      for (final band in entry.value) {
+        // Add small padding to each band
+        final detWidth = band.y2 - band.y1;
+        final freqPadding = detWidth * 0.1;  // 10% padding (reduced from 20%)
+        final paddedY1 = (band.y1 - freqPadding).clamp(0.0, 1.0);
+        final paddedY2 = (band.y2 + freqPadding).clamp(0.0, 1.0);
         
         // Flip: y2 becomes left, y1 becomes right
         final left = (1.0 - paddedY2) * plotWidth;       
         final right = (1.0 - paddedY1) * plotWidth;
         final width = right - left;
 
-        if (width < 1 || paddedY2 <= 0 || paddedY1 >= 1) return const SizedBox.shrink();
+        if (width < 1 || paddedY2 <= 0 || paddedY1 >= 1) continue;
 
-        final color = getSOIColor(det.className);
-        final isSelected = det.isSelected;
+        // CLEANER LOOK: Just vertical lines at edges, no fill
+        // More visible when selected
+        final borderWidth = band.isSelected ? 2.0 : 1.5;
+        final opacity = band.isSelected ? 0.9 : 0.7;
         
-        return Positioned(
-          left: left,
-          top: 0,
-          width: width.clamp(4.0, plotWidth),  
-          height: plotHeight,
-          child: Container(
-            decoration: BoxDecoration(
-              color: color.withOpacity(isSelected ? 0.25 : 0.15),
-              border: Border(
-                left: BorderSide(color: color.withOpacity(0.8), width: 1),
-                right: BorderSide(color: color.withOpacity(0.8), width: 1),
+        widgets.add(
+          Positioned(
+            left: left,
+            top: 0,
+            width: width.clamp(3.0, plotWidth),  
+            height: plotHeight,
+            child: Container(
+              decoration: BoxDecoration(
+                // Very subtle fill only when selected
+                color: band.isSelected ? color.withOpacity(0.08) : null,
+                border: Border(
+                  left: BorderSide(color: color.withOpacity(opacity), width: borderWidth),
+                  right: BorderSide(color: color.withOpacity(opacity), width: borderWidth),
+                ),
               ),
             ),
           ),
         );
-      }).toList(),
+      }
+    }
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: widgets,
     );
   }
 }

@@ -1,0 +1,42 @@
+{
+  "sample_id": "bbc9748189b8ea4e",
+  "source_capture": "C:\\Users\\Crowsoda\\CodingProjects\\g20_demo/data/captures\\MAN_26012026_195643_817MHz.rfcap",
+  "time_offset_sec": 5.624649943395102,
+  "duration_sec": 0.011797652386343671,
+  "window_start_sec": 5.580548769588274,
+  "window_duration_sec": 0.09999999999999964,
+  "center_freq_mhz": 816.5669250043703,
+  "center_freq_hz": 816566925.0043703,
+  "sample_rate_mhz": 3.3333333333333335,
+  "sample_rate": 3333333.3333333335,
+  "created_at": "2026-01-26T20:11:11.910459Z",
+  "created_by": "user_label",
+  "coordinate_format": "real_units",
+  "spectrogram_params": {
+    "fft_size": 4096,
+    "hop_length": 2048,
+    "dynamic_range_db": 80.0,
+    "output_size": [
+      1024,
+      1024
+    ]
+  },
+  "boxes": [
+    {
+      "x_min": 451,
+      "x_max": 572,
+      "y_min": 697,
+      "y_max": 803,
+      "label": "signal",
+      "confidence": null
+    }
+  ],
+  "original_boxes": [
+    {
+      "time_start_sec": 5.624649943395102,
+      "time_end_sec": 5.636447595781446,
+      "freq_start_mhz": 817.2833768618381,
+      "freq_end_mhz": 817.6295987471048
+    }
+  ]
+}

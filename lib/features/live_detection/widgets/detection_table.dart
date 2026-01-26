@@ -54,15 +54,15 @@ class DetectionTable extends ConsumerWidget {
             children: const [
               SizedBox(width: 28), // Eye icon + Color indicator space
               Expanded(
-                flex: 5,  // Increased for longer signal names
+                flex: 5,  // Name
                 child: Text('Name', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: G20Colors.textSecondaryDark)),
               ),
               Expanded(
-                flex: 4,
+                flex: 3,  // DTG (reduced)
                 child: Text('DTG', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: G20Colors.textSecondaryDark)),
               ),
               Expanded(
-                flex: 4,
+                flex: 5,  // MGRS (increased)
                 child: Text('MGRS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: G20Colors.textSecondaryDark)),
               ),
             ],
@@ -148,26 +148,30 @@ class _DetectionRow extends ConsumerWidget {
             ),
             // DTG (Date Time Group)
             Expanded(
-              flex: 4,
+              flex: 3,  // Reduced to give MGRS more space
               child: Text(
                 formatDTG(detection.timestamp),
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   color: isVisible ? G20Colors.textSecondaryDark : G20Colors.textSecondaryDark.withOpacity(0.4),
                   fontFamily: 'monospace',
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             // MGRS (device location)
             Expanded(
-              flex: 4,
+              flex: 5,  // Increased to fit 15-char MGRS
               child: Text(
                 detection.mgrsLocation,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   color: isVisible ? G20Colors.textSecondaryDark : G20Colors.textSecondaryDark.withOpacity(0.4),
                   fontFamily: 'monospace',
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],

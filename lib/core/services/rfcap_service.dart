@@ -269,6 +269,54 @@ class RfcapService {
     }
   }
 
+  /// Read raw IQ bytes from RFCAP file (for sending to backend)
+  /// Returns Uint8List of raw complex64 bytes (ready for base64 encoding)
+  static Future<Uint8List?> readIqDataRaw(String filepath, {int? offsetSamples, int? numSamples}) async {
+    try {
+      final header = await readHeader(filepath);
+      if (header == null) return null;
+
+      final file = File(filepath);
+      
+      // Get actual file size to validate
+      final actualFileSize = await file.length();
+      final actualDataBytes = actualFileSize - rfcapHeaderSize;
+      final actualSamplesInFile = actualDataBytes ~/ 8;
+      
+      final raf = await file.open(mode: FileMode.read);
+
+      // Calculate offset with bounds checking
+      final offset = offsetSamples ?? 0;
+      if (offset >= actualSamplesInFile) {
+        await raf.close();
+        return Uint8List(0);
+      }
+      
+      // Seek to data start
+      final dataStart = rfcapHeaderSize + offset * 8;
+      await raf.setPosition(dataStart);
+
+      // Calculate how many samples we CAN read
+      final requestedSamples = numSamples ?? header.numSamples;
+      final availableSamples = actualSamplesInFile - offset;
+      final samplesToRead = requestedSamples < availableSamples ? requestedSamples : availableSamples;
+      
+      if (samplesToRead <= 0) {
+        await raf.close();
+        return Uint8List(0);
+      }
+      
+      final bytesToRead = samplesToRead * 8;
+      final bytes = await raf.read(bytesToRead);
+      await raf.close();
+
+      return bytes;
+    } catch (e) {
+      print('Error reading RFCAP IQ data raw: $e');
+      return null;
+    }
+  }
+
   /// List all .rfcap files in a directory
   static Future<List<String>> listRfcapFiles(String dirPath) async {
     final dir = Directory(dirPath);
@@ -335,24 +383,39 @@ class RfcapService {
   }
 
   /// Generate DTG (Date Time Group) string for filenames
-  /// Format: HHMMSSzMMMYY (e.g., "210051ZJAN26")
+  /// Format: ddmmyyyy_hhmmss (e.g., "26012026_043243")
   static String generateDTG([DateTime? time]) {
     final t = time ?? DateTime.now().toUtc();
-    final months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
-                    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    final dd = t.day.toString().padLeft(2, '0');
+    final mm = t.month.toString().padLeft(2, '0');
+    final yyyy = t.year.toString();
     final hh = t.hour.toString().padLeft(2, '0');
-    final mm = t.minute.toString().padLeft(2, '0');
+    final min = t.minute.toString().padLeft(2, '0');
     final ss = t.second.toString().padLeft(2, '0');
-    final mon = months[t.month - 1];
-    final yy = (t.year % 100).toString().padLeft(2, '0');
-    return '$hh$mm${ss}Z$mon$yy';
+    return '${dd}${mm}${yyyy}_$hh$min$ss';
   }
 
-  /// Generate filename for capture
-  /// Format: {SIGNAL_NAME}_{DTG}.rfcap
-  static String generateFilename(String signalName, [DateTime? time]) {
+  /// Generate filename for manual capture
+  /// Format: MAN_{ddmmyyyy_hhmmss}_{FREQ}MHz.rfcap
+  /// Example: MAN_26012026_043243_825MHz.rfcap
+  static String generateFilename(String signalName, [DateTime? time, double? freqMHz]) {
     final dtg = generateDTG(time);
-    final safeName = signalName.toUpperCase().replaceAll(RegExp(r'[^\w]'), '_');
-    return '${safeName}_$dtg.rfcap';
+    
+    // Format frequency - round to nearest integer for clean filenames
+    final freqStr = freqMHz != null ? '${freqMHz.round()}MHz' : '';
+    
+    // Use MAN_ prefix for manual captures, otherwise use signal name
+    if (signalName.toUpperCase() == 'MAN' || signalName.toUpperCase().startsWith('MAN_')) {
+      // Manual capture: MAN_ddmmyyyy_hhmmss_FREQMHz.rfcap
+      return freqStr.isNotEmpty 
+          ? 'MAN_${dtg}_$freqStr.rfcap'
+          : 'MAN_$dtg.rfcap';
+    } else {
+      // Named signal: SIGNALNAME_ddmmyyyy_hhmmss_FREQMHz.rfcap
+      final safeName = signalName.toUpperCase().replaceAll(RegExp(r'[^\w]'), '_');
+      return freqStr.isNotEmpty
+          ? '${safeName}_${dtg}_$freqStr.rfcap'
+          : '${safeName}_$dtg.rfcap';
+    }
   }
 }

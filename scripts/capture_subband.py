@@ -137,11 +137,46 @@ def frequency_shift(iq_data, freq_offset_hz, sample_rate):
     return iq_data * shift.astype(np.complex64)
 
 def lowpass_filter_and_resample(iq_data, source_rate, target_bandwidth, target_rate=None):
-    """Apply lowpass filter and optionally resample"""
-    if target_rate is None:
-        target_rate = target_bandwidth * 1.25  # Nyquist + margin
+    """
+    Apply lowpass filter and resample (LEGACY - prefer SubbandExtractor).
     
-    # Design lowpass filter
+    This function is kept for backward compatibility.
+    For new code, use backend.dsp.subband_extractor.SubbandExtractor instead.
+    """
+    # Try to use new DSP module if available
+    try:
+        import sys
+        import os
+        backend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'backend')
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        
+        from dsp.subband_extractor import SubbandExtractor, ExtractionParams
+        
+        params = ExtractionParams(
+            source_rate=source_rate,
+            center_offset=0,  # No shift for this legacy function
+            target_bandwidth=target_bandwidth,
+            target_rate=target_rate,
+            stopband_db=60.0,  # Proper 60dB attenuation
+            remove_dc=True,
+            normalize=False,  # Legacy behavior
+        )
+        
+        extractor = SubbandExtractor(params)
+        result = extractor.extract(iq_data)
+        
+        return result.iq_data, result.output_rate
+        
+    except ImportError:
+        # Fall back to legacy implementation
+        pass
+    
+    # Legacy implementation (kept for fallback)
+    if target_rate is None:
+        target_rate = target_bandwidth * 2.5  # Changed from 1.25 to proper 2.5x
+    
+    # Design lowpass filter with 60dB stopband
     cutoff = target_bandwidth / 2
     nyquist = source_rate / 2
     normalized_cutoff = cutoff / nyquist
@@ -150,9 +185,19 @@ def lowpass_filter_and_resample(iq_data, source_rate, target_bandwidth, target_r
     if normalized_cutoff >= 1.0:
         normalized_cutoff = 0.99
     
-    # FIR lowpass filter
-    numtaps = 101
-    taps = signal.firwin(numtaps, normalized_cutoff)
+    # Kaiser window for 60dB stopband
+    from scipy.signal import kaiserord, firwin
+    transition_width = cutoff * 0.1
+    try:
+        numtaps, beta = kaiserord(60, transition_width / nyquist)
+        if numtaps % 2 == 0:
+            numtaps += 1
+        numtaps = max(numtaps, 63)
+        taps = firwin(numtaps, normalized_cutoff, window=('kaiser', beta))
+    except ValueError:
+        # Fallback to 127-tap filter
+        numtaps = 127
+        taps = signal.firwin(numtaps, normalized_cutoff)
     
     # Apply filter
     filtered = signal.lfilter(taps, 1.0, iq_data)

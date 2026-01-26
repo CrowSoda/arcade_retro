@@ -4,11 +4,16 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:fftea/fftea.dart';
 import '../../../core/config/theme.dart';
 import '../../../core/utils/colormap.dart';
 import '../../../core/services/rfcap_service.dart';
+import '../../../core/logging/g20_logger.dart';
 import '../../live_detection/providers/map_provider.dart' show getSOIColor;
+
+// Logger for this module
+final _log = G20Logger.of('TrainingSpectrogram');
 
 /// Label box for training - stored permanently
 class LabelBox {
@@ -331,6 +336,9 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     
     final fftIn = Float64x2List(fftSize);
     
+    // ASYNC: Process in chunks to keep UI responsive
+    const chunkSize = 50;  // Process 50 frames, then yield to UI
+    
     for (int timeFrame = 0; timeFrame < numTimeFrames; timeFrame++) {
       final sampleOffset = timeFrame * hopSize;
       
@@ -361,6 +369,11 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         // Col = time
         final row = _spectrogramHeight - 1 - freqBin;
         _spectrogramData![row * _spectrogramWidth + timeFrame] = dB;
+      }
+      
+      // ASYNC: Yield to UI every chunkSize frames to prevent freezing
+      if (timeFrame % chunkSize == 0 && timeFrame > 0) {
+        await Future.delayed(Duration.zero);
       }
     }
     
@@ -432,75 +445,126 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
   /// 2. Adaptive seeded region growing
   /// 3. Morphological close/open refinement
   /// 4. Chan-Vese level set fallback for difficult signals
+  /// 
+  /// Includes 2s timeout and error handling with logging.
   void _autoDetect(Offset localPosition, Size size) {
     if (_spectrogramData == null) return;
     
-    // Convert to spectrogram coordinates
-    final col = (localPosition.dx / size.width * _spectrogramWidth).round().clamp(0, _spectrogramWidth - 1);
-    final row = (localPosition.dy / size.height * _spectrogramHeight).round().clamp(0, _spectrogramHeight - 1);
+    final stopwatch = Stopwatch()..start();
+    const timeoutMs = 2000;  // 2 second timeout
     
-    // Stage 1: Extract local window and compute Otsu threshold
-    final localStats = _computeLocalStats(col, row, _localWindowSize);
-    final otsuThreshold = _computeLocalOtsu(col, row, _localWindowSize);
-    
-    // Get power at tap point
-    final centerPower = _spectrogramData![row * _spectrogramWidth + col];
-    
-    // Check if there's signal above local Otsu threshold
-    if (centerPower < otsuThreshold) {
-      // No significant energy - create small default box
-      _createBoxAt(localPosition, size, 0.03, 0.05);
-      return;
-    }
-    
-    // Stage 2: Adaptive seeded region growing
-    final mask = _adaptiveRegionGrow(col, row, otsuThreshold, localStats['stddev']!);
-    
-    // Stage 3: Morphological refinement (close then open)
-    _morphClose(mask, 3);
-    _morphOpen(mask, 2);
-    
-    // Extract bounding box from mask
-    var bbox = _extractBoundingBox(mask);
-    
-    // Stage 4: If result is unreasonable, try Chan-Vese fallback
-    if (bbox == null || _isUnreasonableBox(bbox)) {
-      debugPrint('Primary detection failed, trying Chan-Vese fallback...');
-      final chanVeseMask = _chanVeseLevelSet(col, row);
-      if (chanVeseMask != null) {
-        bbox = _extractBoundingBox(chanVeseMask);
+    try {
+      // Convert to spectrogram coordinates
+      final col = (localPosition.dx / size.width * _spectrogramWidth).round().clamp(0, _spectrogramWidth - 1);
+      final row = (localPosition.dy / size.height * _spectrogramHeight).round().clamp(0, _spectrogramHeight - 1);
+      
+      // Stage 1: Extract local window and compute Otsu threshold
+      final localStats = _computeLocalStats(col, row, _localWindowSize);
+      final otsuThreshold = _computeLocalOtsu(col, row, _localWindowSize);
+      
+      if (stopwatch.elapsedMilliseconds > timeoutMs) {
+        _log.warn('Auto-detect timeout at stage 1 (Otsu)', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
+        _createBoxAt(localPosition, size, 0.03, 0.05);
+        return;
       }
-    }
-    
-    // If still no good result, fall back to simple flood fill
-    if (bbox == null || _isUnreasonableBox(bbox)) {
-      debugPrint('Fallback to simple flood fill...');
-      bbox = _simpleFloodFill(col, row, otsuThreshold * 0.8);
-    }
-    
-    // Create the box
-    if (bbox != null) {
-      // Add generous margin - better to be loose than tight for CNN training
-      // 10% of box size or minimum 8 pixels
-      final boxWidth = bbox['col2']! - bbox['col1']!;
-      final boxHeight = bbox['row2']! - bbox['row1']!;
-      final marginCol = math.max(8, (boxWidth * 0.15).round());
-      final marginRow = math.max(8, (boxHeight * 0.15).round());
       
-      final col1 = (bbox['col1']! - marginCol).clamp(0, _spectrogramWidth - 1);
-      final col2 = (bbox['col2']! + marginCol).clamp(0, _spectrogramWidth - 1);
-      final row1 = (bbox['row1']! - marginRow).clamp(0, _spectrogramHeight - 1);
-      final row2 = (bbox['row2']! + marginRow).clamp(0, _spectrogramHeight - 1);
+      // Get power at tap point
+      final centerPower = _spectrogramData![row * _spectrogramWidth + col];
       
-      _createBox(
-        col1 / _spectrogramWidth,
-        row1 / _spectrogramHeight,
-        col2 / _spectrogramWidth,
-        row2 / _spectrogramHeight,
-      );
-    } else {
-      // Last resort: create small box at click
+      // Check if there's signal above local Otsu threshold
+      if (centerPower < otsuThreshold) {
+        // No significant energy - create small default box
+        _log.debug('No signal at tap point, creating default box', data: {'power': centerPower, 'threshold': otsuThreshold});
+        _createBoxAt(localPosition, size, 0.03, 0.05);
+        return;
+      }
+      
+      // Stage 2: Adaptive seeded region growing
+      final mask = _adaptiveRegionGrow(col, row, otsuThreshold, localStats['stddev']!);
+      
+      if (stopwatch.elapsedMilliseconds > timeoutMs) {
+        _log.warn('Auto-detect timeout at stage 2 (region grow)', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
+        _createBoxAt(localPosition, size, 0.03, 0.05);
+        return;
+      }
+      
+      // Stage 3: Morphological refinement (close then open)
+      _morphClose(mask, 3);
+      _morphOpen(mask, 2);
+      
+      if (stopwatch.elapsedMilliseconds > timeoutMs) {
+        _log.warn('Auto-detect timeout at stage 3 (morphology)', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
+        _createBoxAt(localPosition, size, 0.03, 0.05);
+        return;
+      }
+      
+      // Extract bounding box from mask
+      var bbox = _extractBoundingBox(mask);
+      
+      // Stage 4: If result is unreasonable, try Chan-Vese fallback
+      if (bbox == null || _isUnreasonableBox(bbox)) {
+        if (stopwatch.elapsedMilliseconds > timeoutMs) {
+          _log.warn('Auto-detect timeout before Chan-Vese', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
+          _createBoxAt(localPosition, size, 0.03, 0.05);
+          return;
+        }
+        
+        _log.debug('Primary detection failed, trying Chan-Vese fallback');
+        final chanVeseMask = _chanVeseLevelSet(col, row);
+        if (chanVeseMask != null) {
+          bbox = _extractBoundingBox(chanVeseMask);
+        }
+      }
+      
+      if (stopwatch.elapsedMilliseconds > timeoutMs) {
+        _log.warn('Auto-detect timeout after Chan-Vese', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
+        _createBoxAt(localPosition, size, 0.03, 0.05);
+        return;
+      }
+      
+      // If still no good result, fall back to simple flood fill
+      if (bbox == null || _isUnreasonableBox(bbox)) {
+        _log.debug('Fallback to simple flood fill');
+        bbox = _simpleFloodFill(col, row, otsuThreshold * 0.8);
+      }
+      
+      // Create the box
+      if (bbox != null) {
+        // Add generous margin - better to be loose than tight for CNN training
+        // 10% of box size or minimum 8 pixels
+        final boxWidth = bbox['col2']! - bbox['col1']!;
+        final boxHeight = bbox['row2']! - bbox['row1']!;
+        final marginCol = math.max(8, (boxWidth * 0.15).round());
+        final marginRow = math.max(8, (boxHeight * 0.15).round());
+        
+        final col1 = (bbox['col1']! - marginCol).clamp(0, _spectrogramWidth - 1);
+        final col2 = (bbox['col2']! + marginCol).clamp(0, _spectrogramWidth - 1);
+        final row1 = (bbox['row1']! - marginRow).clamp(0, _spectrogramHeight - 1);
+        final row2 = (bbox['row2']! + marginRow).clamp(0, _spectrogramHeight - 1);
+        
+        _log.info('Auto-detect success', data: {
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+          'box_width': col2 - col1,
+          'box_height': row2 - row1,
+        });
+        
+        _createBox(
+          col1 / _spectrogramWidth,
+          row1 / _spectrogramHeight,
+          col2 / _spectrogramWidth,
+          row2 / _spectrogramHeight,
+        );
+      } else {
+        // Last resort: create small box at click
+        _log.debug('All detection methods failed, creating default box');
+        _createBoxAt(localPosition, size, 0.03, 0.05);
+      }
+    } catch (e, stack) {
+      _log.error('Auto-detect failed with exception', error: e, stackTrace: stack);
+      // Create a small default box on error so user isn't stuck
       _createBoxAt(localPosition, size, 0.03, 0.05);
+    } finally {
+      stopwatch.stop();
     }
   }
   
@@ -863,12 +927,25 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     final absTimeEnd = _windowStartSec + math.max(x1, x2) * _windowLengthSec;
     
     // Calculate frequency bounds
+    // CRITICAL: Flutter's spectrogram only shows POSITIVE frequencies (DC to +fs/2)
+    // because _spectrogramHeight = fftSize ~/ 2 (only half the spectrum).
+    // The frequency range displayed is: centerFreq to centerFreq + sampleRate/2
+    // (NOT centerFreq - sampleRate/2 to centerFreq + sampleRate/2!)
     double? freqStartMHz, freqEndMHz;
     if (widget.header != null) {
-      final bwHz = widget.header!.bandwidthHz;
+      // Flutter shows: row 0 (top) = +fs/2 (highest), row max (bottom) = DC
+      // Frequency range: cfHz (DC) to cfHz + fs/2 (Nyquist)
+      final sampleRateHz = widget.header!.sampleRate;
       final cfHz = widget.header!.centerFreqHz;
-      freqStartMHz = (cfHz - bwHz/2 + (1 - math.max(y1, y2)) * bwHz) / 1e6;
-      freqEndMHz = (cfHz - bwHz/2 + (1 - math.min(y1, y2)) * bwHz) / 1e6;
+      final freqMinHz = cfHz;  // DC (bottom of display)
+      final freqRangeHz = sampleRateHz / 2;  // Only positive frequencies
+      
+      // y=0 (top) = highest freq = cfHz + fs/2
+      // y=1 (bottom) = lowest freq = cfHz (DC)
+      // freq = freqMinHz + (1 - y) * freqRangeHz
+      freqStartMHz = (freqMinHz + (1 - math.max(y1, y2)) * freqRangeHz) / 1e6;
+      freqEndMHz = (freqMinHz + (1 - math.min(y1, y2)) * freqRangeHz) / 1e6;
+      debugPrint('[_createBox] Positive freq only: range=${cfHz/1e6}-${(cfHz + freqRangeHz)/1e6}MHz, box=${freqStartMHz.toStringAsFixed(2)}-${freqEndMHz.toStringAsFixed(2)} MHz');
     }
     
     final box = LabelBox(
@@ -966,14 +1043,85 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     super.dispose();
   }
 
-  // Navigation methods - work with the new zoom bounds
+  // Pending navigation - don't update until image is ready
+  double? _pendingTimeStart;
+  double? _pendingTimeEnd;
+  
+  // Navigation methods - DEFERRED UPDATE: boxes stay in sync with image
   void _navigate(double deltaSec) {
     final currentLength = _viewTimeEndSec - _viewTimeStartSec;
-    setState(() {
-      _viewTimeStartSec = (_viewTimeStartSec + deltaSec).clamp(0.0, math.max(0.0, _totalDurationSec - currentLength));
-      _viewTimeEndSec = _viewTimeStartSec + currentLength;
-    });
-    _loadAndCompute();
+    // Store pending values but DON'T update state yet
+    _pendingTimeStart = (_viewTimeStartSec + deltaSec).clamp(0.0, math.max(0.0, _totalDurationSec - currentLength));
+    _pendingTimeEnd = _pendingTimeStart! + currentLength;
+    
+    // Show subtle loading indicator without changing window bounds
+    setState(() => _isLoading = true);
+    
+    // Load the new window - bounds will update when image is ready
+    _loadAndComputeDeferred(_pendingTimeStart!, _pendingTimeEnd!);
+  }
+  
+  Future<void> _loadAndComputeDeferred(double newTimeStart, double newTimeEnd) async {
+    if (widget.filepath == null) return;
+
+    try {
+      final header = await RfcapService.readHeader(widget.filepath!);
+      if (header == null) {
+        setState(() {
+          _error = 'Failed to read file header';
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      _sampleRate = header.sampleRate;
+      _totalDurationSec = header.numSamples / _sampleRate;
+      _totalBandwidthHz = header.bandwidthHz;
+      _centerFreqHz = header.centerFreqHz;
+      
+      // Calculate time window to load
+      final timeWindowSec = newTimeEnd - newTimeStart;
+      final offsetSamples = (newTimeStart * _sampleRate).toInt();
+      final numSamples = (timeWindowSec * _sampleRate).toInt();
+      
+      // Load only the window of IQ data
+      final iqData = await RfcapService.readIqData(
+        widget.filepath!,
+        offsetSamples: offsetSamples,
+        numSamples: numSamples,
+      );
+
+      if (iqData == null || iqData.isEmpty) {
+        setState(() {
+          _error = 'Failed to load IQ data';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Cache for zoom recomputation
+      _cachedIqData = iqData;
+      _cachedOffsetSamples = offsetSamples;
+      _cachedNumSamples = numSamples;
+      
+      // Compute spectrogram
+      await _computeZoomSpectrogram(iqData);
+      
+      // NOW update bounds - image is ready, boxes will render in sync
+      setState(() {
+        _viewTimeStartSec = newTimeStart;
+        _viewTimeEndSec = newTimeEnd;
+        _isLoading = false;
+        _pendingTimeStart = null;
+        _pendingTimeEnd = null;
+      });
+    } catch (e) {
+      debugPrint('Error in _loadAndComputeDeferred: $e');
+      setState(() {
+        _error = 'Error: $e';
+        _isLoading = false;
+      });
+    }
   }
 
   void _setWindowLength(double lengthSec) {
@@ -1311,76 +1459,79 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
           ),
           const SizedBox(height: 12),
           
-          // Navigation buttons - full window (<</>>) and half window (</>)
+          // Navigation buttons - MOBILE FRIENDLY (56px tall, color coded)
+          // BACK = Orange, FORWARD = Green (double arrows brighter)
           Row(
             children: [
-              // << full window back
+              // << full window back - BRIGHT ORANGE
               Expanded(
                 child: SizedBox(
-                  height: 40,
+                  height: 56,
                   child: ElevatedButton(
                     onPressed: () => _navigate(-_windowLengthSec),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: G20Colors.cardDark,
-                      foregroundColor: G20Colors.textPrimaryDark,
+                      backgroundColor: const Color(0xFFFF8C00),  // Bright orange
+                      foregroundColor: Colors.white,
                       padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    child: const Text('◀◀', style: TextStyle(fontSize: 14)),
+                    child: const Text('◀◀', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
-              // >> full window forward
+              const SizedBox(width: 6),
+              // >> full window forward - BRIGHT GREEN
               Expanded(
                 child: SizedBox(
-                  height: 40,
+                  height: 56,
                   child: ElevatedButton(
                     onPressed: () => _navigate(_windowLengthSec),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: G20Colors.cardDark,
-                      foregroundColor: G20Colors.textPrimaryDark,
+                      backgroundColor: const Color(0xFF00C853),  // Bright green
+                      foregroundColor: Colors.white,
                       padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    child: const Text('▶▶', style: TextStyle(fontSize: 14)),
+                    child: const Text('▶▶', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          // Half window navigation (< / >)
+          const SizedBox(height: 6),
+          // Half window navigation (< / >) - DIMMER VERSIONS
           Row(
             children: [
+              // < half back - DIM ORANGE
               Expanded(
                 child: SizedBox(
-                  height: 40,
+                  height: 56,
                   child: ElevatedButton(
                     onPressed: () => _navigate(-_windowLengthSec / 2),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: G20Colors.cardDark,
-                      foregroundColor: G20Colors.textPrimaryDark,
+                      backgroundColor: const Color(0xFFCC7000),  // Dim orange
+                      foregroundColor: Colors.white,
                       padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    child: const Text('◀', style: TextStyle(fontSize: 16)),
+                    child: const Text('◀', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 6),
+              // > half forward - DIM GREEN
               Expanded(
                 child: SizedBox(
-                  height: 40,
+                  height: 56,
                   child: ElevatedButton(
                     onPressed: () => _navigate(_windowLengthSec / 2),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: G20Colors.cardDark,
-                      foregroundColor: G20Colors.textPrimaryDark,
+                      backgroundColor: const Color(0xFF00A040),  // Dim green
+                      foregroundColor: Colors.white,
                       padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    child: const Text('▶', style: TextStyle(fontSize: 16)),
+                    child: const Text('▶', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ),
@@ -1682,6 +1833,7 @@ class _BoxWidget extends StatelessWidget {
 
 /// Box widget that uses pre-computed screen rect (for absolute time coords)
 /// Uses SOI color for the signal class - same colors as live detection page
+/// ONE-CLICK DELETE: Tapping a box deletes it immediately
 class _BoxWidgetAbsolute extends StatelessWidget {
   final LabelBox box;
   final Rect screenRect;
@@ -1699,41 +1851,20 @@ class _BoxWidgetAbsolute extends StatelessWidget {
   Widget build(BuildContext context) {
     // Use SOI color based on signal class name - consistent with live detection
     final soiColor = getSOIColor(box.className);
-    final borderColor = box.isSelected ? Colors.white : soiColor;
     
     return Positioned.fromRect(
       rect: screenRect,
       child: GestureDetector(
-        onTap: onTap,
+        // ONE-CLICK DELETE: Tapping box deletes it
+        onTap: onDelete,
         child: Container(
           decoration: BoxDecoration(
             border: Border.all(
-              color: borderColor,
-              width: box.isSelected ? 4 : 3,
+              color: soiColor,
+              width: 3,
             ),
             color: soiColor.withOpacity(0.2),
           ),
-          // Delete button only when selected - positioned in corner
-          child: box.isSelected ? Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                top: -12, right: -12,
-                child: GestureDetector(
-                  onTap: onDelete,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: G20Colors.error,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: const Icon(Icons.close, size: 14, color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
-          ) : null,
         ),
       ),
     );
@@ -1773,9 +1904,13 @@ class _FreqAxis extends StatelessWidget {
   Widget build(BuildContext context) {
     if (header == null) return const SizedBox();
     
-    final low = header!.centerFreqMHz - header!.bandwidthMHz / 2;
-    final high = header!.centerFreqMHz + header!.bandwidthMHz / 2;
-    final mid = header!.centerFreqMHz;
+    // CRITICAL: Flutter spectrogram only shows POSITIVE frequencies (DC to +fs/2)
+    // because _spectrogramHeight = fftSize ~/ 2.
+    // Displayed range: centerFreq (DC/bottom) to centerFreq + sampleRate/2 (top)
+    final halfBwMHz = header!.sampleRate / 2 / 1e6;  // Only positive frequencies
+    final low = header!.centerFreqMHz;  // DC is at bottom
+    final high = header!.centerFreqMHz + halfBwMHz;  // +Nyquist is at top
+    final mid = header!.centerFreqMHz + halfBwMHz / 2;
     
     return Container(
       padding: const EdgeInsets.only(right: 4),

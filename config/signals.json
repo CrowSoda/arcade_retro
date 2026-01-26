@@ -1,0 +1,293 @@
+[
+  {
+    "id": "sig_1769434403464",
+    "name": "Creamy_Pork",
+    "modType": "QPSK",
+    "modRate": 14400.0,
+    "bandwidth": 200.0,
+    "notes": null,
+    "totalDataLabels": 2567,
+    "f1Score": 0.6399994880003297,
+    "precision": 0.4999999687500019,
+    "recall": 0.8888887901234679,
+    "timesAbove90": 0,
+    "trainingHistory": [
+      {
+        "timestamp": "2026-01-26T06:33:23.462336",
+        "dataLabels": 13,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T06:36:50.977425",
+        "dataLabels": 210,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T06:43:32.723151",
+        "dataLabels": 200,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T06:51:58.381378",
+        "dataLabels": 200,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T07:06:20.244373",
+        "dataLabels": 394,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T07:16:40.522938",
+        "dataLabels": 194,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T07:20:13.743772",
+        "dataLabels": 194,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T07:26:16.650531",
+        "dataLabels": 194,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 5,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T07:31:13.282532",
+        "dataLabels": 194,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T07:41:44.218667",
+        "dataLabels": 194,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T08:08:33.953472",
+        "dataLabels": 194,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T09:35:42.165002",
+        "dataLabels": 263,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T09:48:30.731781",
+        "dataLabels": 16,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T09:53:37.695122",
+        "dataLabels": 21,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T09:59:46.463180",
+        "dataLabels": 6,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T10:02:42.614240",
+        "dataLabels": 6,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T10:03:59.657918",
+        "dataLabels": 6,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T10:07:22.180124",
+        "dataLabels": 5,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T10:09:09.454442",
+        "dataLabels": 9,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T10:14:19.229345",
+        "dataLabels": 5,
+        "f1Score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Pork/active.pth"
+      },
+      {
+        "timestamp": "2026-01-26T12:19:38.167241",
+        "dataLabels": 49,
+        "f1Score": 0.6399994880003297,
+        "precision": 0.4999999687500019,
+        "recall": 0.8888887901234679,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/CREAMY_PORK/active.pth"
+      }
+    ],
+    "created": "2026-01-26T06:33:23.464336",
+    "modified": "2026-01-26T12:21:53.100633"
+  },
+  {
+    "id": "sig_1769456896603",
+    "name": "Creamy_Chicken",
+    "modType": "--",
+    "modRate": null,
+    "bandwidth": null,
+    "notes": null,
+    "totalDataLabels": 27,
+    "f1Score": 0.6666661333336267,
+    "precision": 0.499999950000005,
+    "recall": 0.99999980000004,
+    "timesAbove90": 0,
+    "trainingHistory": [
+      {
+        "timestamp": "2026-01-26T12:48:16.603046",
+        "dataLabels": 27,
+        "f1Score": 0.6666661333336267,
+        "precision": 0.499999950000005,
+        "recall": 0.99999980000004,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Chicken/active.pth"
+      }
+    ],
+    "created": "2026-01-26T12:48:16.603046",
+    "modified": "2026-01-26T12:48:16.603046"
+  },
+  {
+    "id": "sig_1769458301142",
+    "name": "Creamy_Beef",
+    "modType": "--",
+    "modRate": null,
+    "bandwidth": null,
+    "notes": null,
+    "totalDataLabels": 40,
+    "f1Score": 0.5999994000004001,
+    "precision": 0.49999991666668053,
+    "recall": 0.7499998125000469,
+    "timesAbove90": 0,
+    "trainingHistory": [
+      {
+        "timestamp": "2026-01-26T13:11:41.141119",
+        "dataLabels": 20,
+        "f1Score": 0.5999994000004001,
+        "precision": 0.49999991666668053,
+        "recall": 0.7499998125000469,
+        "epochs": 30,
+        "loss": null,
+        "modelPath": null
+      },
+      {
+        "timestamp": "2026-01-26T13:11:41.142118",
+        "dataLabels": 20,
+        "f1Score": 0.5999994000004001,
+        "precision": 0.49999991666668053,
+        "recall": 0.7499998125000469,
+        "epochs": 30,
+        "loss": 0.0,
+        "modelPath": "models/heads/Creamy_Beef/active.pth"
+      }
+    ],
+    "created": "2026-01-26T13:11:41.142118",
+    "modified": "2026-01-26T13:11:41.142118"
+  }
+]

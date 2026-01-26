@@ -5,6 +5,11 @@ Training data lives in: training_data/signals/{signal_name}/samples/
 Each sample has:
   - XXXX.npz  (uint8 spectrogram, 1024x1024)
   - XXXX.json (bounding boxes, metadata)
+
+COORDINATE FIX (Jan 2026):
+- sample_manager.py now applies np.flipud during spectrogram generation
+- sample_manager.py now converts real-unit boxes to correct pixel coords
+- This dataset just loads raw pixel coords - NO Y-FLIP NEEDED
 """
 
 import os
@@ -50,7 +55,28 @@ class SpectrogramDataset(Dataset):
                 print(f"Warning: Sample {sid} missing files, skipping")
         
         self.sample_ids = valid_ids
-        print(f"SpectrogramDataset: {len(self.sample_ids)} samples from {samples_dir}")
+        print(f"SpectrogramDataset: {len(self.sample_ids)} samples from {samples_dir}", flush=True)
+    
+    def _print_debug_sample(self, idx: int):
+        """Print debug info for a sample."""
+        sample_id = self.sample_ids[idx]
+        json_path = self.samples_dir / f"{sample_id}.json"
+        npz_path = self.samples_dir / f"{sample_id}.npz"
+        
+        with open(json_path) as f:
+            metadata = json.load(f)
+        with np.load(npz_path) as data:
+            spec = data["spectrogram"]
+        
+        print(f"\n[DEBUG] Sample {sample_id}:")
+        print(f"  Spectrogram shape: {spec.shape}, dtype: {spec.dtype}")
+        print(f"  Spectrogram min/max: {spec.min()}/{spec.max()}")
+        print(f"  Boxes raw: {metadata.get('boxes', [])}")
+        for i, box in enumerate(metadata.get('boxes', [])):
+            x_min, y_min = box['x_min'], box['y_min']
+            x_max, y_max = box['x_max'], box['y_max']
+            w, h = x_max - x_min, y_max - y_min
+            print(f"  Box {i}: ({x_min},{y_min}) -> ({x_max},{y_max}), size={w}x{h}")
     
     def __len__(self) -> int:
         return len(self.sample_ids)
@@ -90,14 +116,25 @@ class SpectrogramDataset(Dataset):
         
         boxes = []
         labels = []
+        img_height = 1024  # Spectrogram height
         for box in metadata.get("boxes", []):
             # Boxes are stored in pixel coordinates (0-1023)
-            boxes.append([
-                box["x_min"],
-                box["y_min"],
-                box["x_max"],
-                box["y_max"]
-            ])
+            # Ensure x_min < x_max and y_min < y_max (some old samples have flipped coords)
+            x_min = min(box["x_min"], box["x_max"])
+            x_max = max(box["x_min"], box["x_max"])
+            y_min = min(box["y_min"], box["y_max"])
+            y_max = max(box["y_min"], box["y_max"])
+            
+            # NO Y-FLIP NEEDED: sample_manager.py now applies np.flipud to the spectrogram
+            # so Y=0 is HIGH frequency (matching Flutter's visual orientation)
+            
+            # Ensure positive width/height (at least 1 pixel)
+            if x_max <= x_min:
+                x_max = x_min + 1
+            if y_max <= y_min:
+                y_max = y_min + 1
+            
+            boxes.append([x_min, y_min, x_max, y_max])
             labels.append(1)  # All are signal class
         
         if len(boxes) == 0:

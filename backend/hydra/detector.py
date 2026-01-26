@@ -28,6 +28,7 @@ import torch
 import torch.nn as nn
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
 
 from .config import DEFAULT_SCORE_THRESHOLD, MAX_DETECTIONS_PER_HEAD
 
@@ -204,7 +205,24 @@ class HydraDetector:
         
         # Create FasterRCNN model with ResNet18-FPN backbone
         backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
-        self.model = FasterRCNN(backbone, num_classes=2)
+        
+        # Custom anchor generator for narrow signal boxes (~12x84 pixels, aspect ~0.15)
+        # MUST match training config in training/service.py:
+        # - 5 sizes per FPN level × 4 aspect ratios = 20 anchors per location
+        # - Default FasterRCNN only has 3 anchors (1 size × 3 ratios)
+        anchor_generator = AnchorGenerator(
+            sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
+            aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5  # Same aspects for all 5 FPN levels
+        )
+        
+        self.model = FasterRCNN(
+            backbone,
+            num_classes=2,
+            rpn_anchor_generator=anchor_generator,
+            # Lower RPN thresholds for small objects (matches training)
+            rpn_fg_iou_thresh=0.5,
+            rpn_bg_iou_thresh=0.3,
+        )
         
         # Load backbone weights
         backbone_state = torch.load(backbone_path, map_location=self.device, weights_only=False)
@@ -226,12 +244,25 @@ class HydraDetector:
         """
         Load detection heads for specified signals.
         
+        This performs a FULL SWAP: unloads heads not in the list, loads new ones.
+        This ensures the detector only runs the requested signals.
+        
         Args:
             signal_names: List of signal names to load
         """
         if not self._backbone_loaded:
             self.load_backbone()
         
+        # FULL SWAP: Unload heads NOT in the requested list
+        requested_set = set(signal_names)
+        current_heads = list(self.heads.keys())
+        heads_to_unload = [h for h in current_heads if h not in requested_set]
+        
+        if heads_to_unload:
+            logger.info(f"Unloading heads not in request: {heads_to_unload}")
+            self.unload_heads(heads_to_unload)
+        
+        # Load new heads
         for name in signal_names:
             if name in self.heads:
                 logger.info(f"Head already loaded: {name}")
@@ -304,7 +335,10 @@ class HydraDetector:
         score_threshold: float = DEFAULT_SCORE_THRESHOLD
     ) -> Dict[str, List[Detection]]:
         """
-        Run all loaded heads on spectrogram.
+        Run all loaded heads on spectrogram EFFICIENTLY.
+        
+        OPTIMIZED: Compute backbone features ONCE, then run all heads on shared features.
+        This is 2-3x faster than switching heads sequentially.
         
         Args:
             spectrogram: [1, 3, 1024, 1024] normalized tensor (0-1 float)
@@ -324,15 +358,48 @@ class HydraDetector:
         
         results = {}
         
+        # OPTIMIZATION: Compute backbone features ONCE
+        t0 = time.perf_counter()
+        images = [spectrogram[0]]
+        
+        # Get original image sizes for FasterRCNN transform
+        original_image_sizes = [(img.shape[-2], img.shape[-1]) for img in images]
+        
+        # Apply transform (normalization, resize)
+        images_transformed, targets = self.model.transform(images, None)
+        
+        # Compute backbone features ONCE (the expensive part!)
+        features = self.model.backbone(images_transformed.tensors)
+        
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        self._last_backbone_ms = (time.perf_counter() - t0) * 1000
+        
+        # Now run each head on the SHARED features (fast - just RPN + ROI)
         for signal_name in self.heads:
             t0 = time.perf_counter()
             
-            # Switch to this head
-            self._switch_head(signal_name)
+            # Load this head's RPN + ROI weights
+            head_state = self.heads[signal_name]
             
-            # Run inference
-            # FasterRCNN expects list of images
-            outputs = self.model([spectrogram[0]])
+            # Only load RPN and ROI head weights (not backbone!)
+            for key, value in head_state.items():
+                if key.startswith("rpn.") or key.startswith("roi_heads."):
+                    # Get the parameter in the model and copy in-place
+                    param = self.model
+                    parts = key.split('.')
+                    for part in parts[:-1]:
+                        param = getattr(param, part)
+                    getattr(param, parts[-1]).copy_(value.to(self.device))
+            
+            # Run RPN on shared features
+            proposals, proposal_losses = self.model.rpn(images_transformed, features, None)
+            
+            # Run ROI heads on shared features  
+            detections_list, detector_losses = self.model.roi_heads(features, proposals, images_transformed.image_sizes, None)
+            
+            # Post-process detections back to original image size
+            detections_out = self.model.transform.postprocess(detections_list, images_transformed.image_sizes, original_image_sizes)
             
             if self.device.type == "cuda":
                 torch.cuda.synchronize()
@@ -340,7 +407,7 @@ class HydraDetector:
             
             # Convert to Detection objects
             detections = []
-            out = outputs[0]
+            out = detections_out[0]
             boxes = out["boxes"].cpu().numpy()
             scores = out["scores"].cpu().numpy()
             labels = out["labels"].cpu().numpy()

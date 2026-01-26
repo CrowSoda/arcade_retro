@@ -38,6 +38,43 @@ const List<String> kModTypes = [
   'Unknown',
 ];
 
+/// Individual detection record with score, timestamp, and context
+class DetectionRecord {
+  final DateTime timestamp;
+  final double score;         // Confidence score 0-1
+  final double freqMHz;       // Detection frequency
+  final double? bandwidthMHz; // Signal bandwidth
+  final String? mgrsLocation; // Device location
+  final int? trackId;         // Track ID if assigned
+
+  const DetectionRecord({
+    required this.timestamp,
+    required this.score,
+    required this.freqMHz,
+    this.bandwidthMHz,
+    this.mgrsLocation,
+    this.trackId,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'timestamp': timestamp.toIso8601String(),
+    'score': score,
+    'freqMHz': freqMHz,
+    'bandwidthMHz': bandwidthMHz,
+    'mgrsLocation': mgrsLocation,
+    'trackId': trackId,
+  };
+
+  factory DetectionRecord.fromJson(Map<String, dynamic> json) => DetectionRecord(
+    timestamp: DateTime.parse(json['timestamp']),
+    score: (json['score'] as num).toDouble(),
+    freqMHz: (json['freqMHz'] as num).toDouble(),
+    bandwidthMHz: (json['bandwidthMHz'] as num?)?.toDouble(),
+    mgrsLocation: json['mgrsLocation'],
+    trackId: json['trackId'],
+  );
+}
+
 /// Training result from a single training run
 class TrainingResult {
   final DateTime timestamp;
@@ -99,8 +136,9 @@ class SignalEntry {
   double? recall;         // Best/latest recall
   int timesAbove90;       // Detection count with >90% confidence
   
-  // Training history
+  // History
   List<TrainingResult> trainingHistory;
+  List<DetectionRecord> detectionHistory;  // Recent high-confidence detections
   
   // Timestamps
   DateTime created;
@@ -119,9 +157,11 @@ class SignalEntry {
     this.recall,
     this.timesAbove90 = 0,
     List<TrainingResult>? trainingHistory,
+    List<DetectionRecord>? detectionHistory,
     DateTime? created,
     DateTime? modified,
   }) : trainingHistory = trainingHistory ?? [],
+       detectionHistory = detectionHistory ?? [],
        created = created ?? DateTime.now(),
        modified = modified ?? DateTime.now();
 
@@ -154,6 +194,31 @@ class SignalEntry {
     modified = DateTime.now();
   }
 
+  /// Add a detection record (for >90% confidence detections)
+  /// Keeps last 100 detections per signal
+  void addDetectionRecord(DetectionRecord record) {
+    detectionHistory.add(record);
+    timesAbove90++;
+    // Keep only last 100 detections per signal to prevent unbounded growth
+    if (detectionHistory.length > 100) {
+      detectionHistory.removeAt(0);
+    }
+    modified = DateTime.now();
+  }
+
+  /// Get recent detections (last N)
+  List<DetectionRecord> getRecentDetections([int count = 10]) {
+    final start = detectionHistory.length > count ? detectionHistory.length - count : 0;
+    return detectionHistory.sublist(start);
+  }
+
+  /// Get average score from recent detections
+  double? get averageRecentScore {
+    if (detectionHistory.isEmpty) return null;
+    final recent = getRecentDetections(20);
+    return recent.map((d) => d.score).reduce((a, b) => a + b) / recent.length;
+  }
+
   SignalEntry copyWith({
     String? name,
     String? modType,
@@ -166,6 +231,7 @@ class SignalEntry {
     double? recall,
     int? timesAbove90,
     List<TrainingResult>? trainingHistory,
+    List<DetectionRecord>? detectionHistory,
   }) {
     return SignalEntry(
       id: id,
@@ -180,6 +246,7 @@ class SignalEntry {
       recall: recall ?? this.recall,
       timesAbove90: timesAbove90 ?? this.timesAbove90,
       trainingHistory: trainingHistory ?? this.trainingHistory,
+      detectionHistory: detectionHistory ?? this.detectionHistory,
       created: created,
       modified: DateTime.now(),
     );
@@ -198,6 +265,7 @@ class SignalEntry {
     'recall': recall,
     'timesAbove90': timesAbove90,
     'trainingHistory': trainingHistory.map((t) => t.toJson()).toList(),
+    'detectionHistory': detectionHistory.map((d) => d.toJson()).toList(),
     'created': created.toIso8601String(),
     'modified': modified.toIso8601String(),
   };
@@ -216,6 +284,9 @@ class SignalEntry {
     timesAbove90: json['timesAbove90'] ?? 0,
     trainingHistory: (json['trainingHistory'] as List<dynamic>?)
         ?.map((t) => TrainingResult.fromJson(t))
+        .toList() ?? [],
+    detectionHistory: (json['detectionHistory'] as List<dynamic>?)
+        ?.map((d) => DetectionRecord.fromJson(d))
         .toList() ?? [],
     created: json['created'] != null ? DateTime.parse(json['created']) : DateTime.now(),
     modified: json['modified'] != null ? DateTime.parse(json['modified']) : DateTime.now(),
@@ -373,7 +444,7 @@ class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
     debugPrint('[SignalDB] Training result added for "$signalName": F1=${result.f1Score.toStringAsFixed(2)}, labels=${result.dataLabels}');
   }
 
-  /// Increment detection count for a signal
+  /// Increment detection count for a signal (legacy - use addDetectionRecord instead)
   void incrementDetectionCount(String signalName) {
     final existing = getByName(signalName);
     if (existing != null) {
@@ -381,6 +452,42 @@ class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
       state = [...state];
       _saveToDisk();
     }
+  }
+
+  /// Add a detailed detection record to a signal (for >90% confidence detections)
+  /// Creates the signal entry if it doesn't exist
+  void addDetectionRecord({
+    required String signalName,
+    required double score,
+    required double freqMHz,
+    double? bandwidthMHz,
+    String? mgrsLocation,
+    int? trackId,
+  }) {
+    final record = DetectionRecord(
+      timestamp: DateTime.now(),
+      score: score,
+      freqMHz: freqMHz,
+      bandwidthMHz: bandwidthMHz,
+      mgrsLocation: mgrsLocation,
+      trackId: trackId,
+    );
+
+    var entry = getByName(signalName);
+    if (entry == null) {
+      // Create new entry for unknown signal
+      entry = SignalEntry(
+        id: 'sig_${DateTime.now().millisecondsSinceEpoch}',
+        name: signalName.toLowerCase(),
+      );
+      state = [...state, entry];
+    }
+
+    entry.addDetectionRecord(record);
+    state = [...state]; // Trigger rebuild
+    _saveToDisk();
+    
+    debugPrint('[SignalDB] Detection logged: $signalName @ ${freqMHz.toStringAsFixed(2)} MHz, score=${(score * 100).toStringAsFixed(0)}%');
   }
 
   /// Get or create signal entry (for detection/training)

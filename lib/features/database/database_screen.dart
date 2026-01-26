@@ -1,12 +1,14 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import '../../core/config/theme.dart';
 import '../../core/database/signal_database.dart';
 
 // Re-export for backwards compatibility
 export '../../core/database/signal_database.dart' show SignalEntry, kModTypes, signalDatabaseProvider;
 
-/// Database screen - View and edit signal metadata
+/// Database screen - View and manage signals and models
 class DatabaseScreen extends ConsumerStatefulWidget {
   const DatabaseScreen({super.key});
 
@@ -14,9 +16,62 @@ class DatabaseScreen extends ConsumerStatefulWidget {
   ConsumerState<DatabaseScreen> createState() => _DatabaseScreenState();
 }
 
-class _DatabaseScreenState extends ConsumerState<DatabaseScreen> {
+class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   String _searchQuery = '';
   SignalEntry? _selectedEntry;
+  List<ModelInfo> _models = [];
+  bool _loadingModels = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.index == 1 && _models.isEmpty) {
+        _loadModels();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadModels() async {
+    setState(() => _loadingModels = true);
+    
+    final models = <ModelInfo>[];
+    final modelsDir = Directory('models');
+    
+    if (await modelsDir.exists()) {
+      await for (final entity in modelsDir.list()) {
+        if (entity is File) {
+          final ext = p.extension(entity.path).toLowerCase();
+          if (ext == '.pt' || ext == '.pth' || ext == '.onnx' || ext == '.engine') {
+            final stat = await entity.stat();
+            models.add(ModelInfo(
+              name: p.basename(entity.path),
+              path: entity.path,
+              size: stat.size,
+              modified: stat.modified,
+              type: ext.replaceFirst('.', '').toUpperCase(),
+            ));
+          }
+        }
+      }
+    }
+    
+    // Sort by modified date (newest first)
+    models.sort((a, b) => b.modified.compareTo(a.modified));
+    
+    setState(() {
+      _models = models;
+      _loadingModels = false;
+    });
+  }
 
   void _showEditDialog(SignalEntry entry) {
     setState(() => _selectedEntry = entry);
@@ -33,13 +88,84 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> {
     );
   }
 
+  void _confirmDeleteSignal(SignalEntry entry) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: G20Colors.surfaceDark,
+        title: const Text('Delete Signal', style: TextStyle(color: G20Colors.textPrimaryDark)),
+        content: Text(
+          'Are you sure you want to delete "${entry.name}"?\n\nThis will remove the signal from the database but NOT delete any training samples.',
+          style: const TextStyle(color: G20Colors.textSecondaryDark),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              ref.read(signalDatabaseProvider.notifier).deleteSignal(entry.id);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: G20Colors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteModel(ModelInfo model) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: G20Colors.surfaceDark,
+        title: const Text('Delete Model', style: TextStyle(color: G20Colors.textPrimaryDark)),
+        content: Text(
+          'Are you sure you want to delete "${model.name}"?\n\nThis cannot be undone.',
+          style: const TextStyle(color: G20Colors.textSecondaryDark),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await File(model.path).delete();
+                _loadModels();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Deleted ${model.name}'), backgroundColor: G20Colors.success),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: $e'), backgroundColor: G20Colors.error),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: G20Colors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final entries = ref.watch(signalDatabaseProvider);
-    final filteredEntries = _searchQuery.isEmpty
-        ? entries
-        : entries.where((e) => e.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
-
     return Scaffold(
       backgroundColor: G20Colors.backgroundDark,
       body: Padding(
@@ -47,161 +173,65 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with search
+            // Header with tabs
             Row(
               children: [
                 const Icon(Icons.storage, color: G20Colors.primary),
                 const SizedBox(width: 8),
                 const Text(
-                  'Signal Database',
+                  'Database',
                   style: TextStyle(
                     color: G20Colors.textPrimaryDark,
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const Spacer(),
-                // Search box
-                SizedBox(
-                  width: 250,
-                  child: TextField(
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                    style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Search signals...',
-                      hintStyle: TextStyle(color: G20Colors.textSecondaryDark.withOpacity(0.5)),
-                      prefixIcon: const Icon(Icons.search, color: G20Colors.textSecondaryDark, size: 20),
-                      filled: true,
-                      fillColor: G20Colors.surfaceDark,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide.none,
-                      ),
+                const SizedBox(width: 24),
+                // Tabs
+                Container(
+                  decoration: BoxDecoration(
+                    color: G20Colors.surfaceDark,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: TabBar(
+                    controller: _tabController,
+                    isScrollable: true,
+                    indicator: BoxDecoration(
+                      color: G20Colors.primary,
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: G20Colors.textSecondaryDark,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    unselectedLabelStyle: const TextStyle(fontSize: 14),
+                    dividerHeight: 0,
+                    tabs: const [
+                      Tab(text: '  Signals  ', icon: Icon(Icons.signal_cellular_alt, size: 18)),
+                      Tab(text: '  Models  ', icon: Icon(Icons.model_training, size: 18)),
+                    ],
                   ),
                 ),
+                const Spacer(),
+                // Refresh button (for models tab)
+                if (_tabController.index == 1)
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: G20Colors.primary),
+                    onPressed: _loadModels,
+                    tooltip: 'Refresh models',
+                  ),
               ],
             ),
             const SizedBox(height: 16),
             
-            // Table header
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: G20Colors.surfaceDark,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-                border: Border.all(color: G20Colors.cardDark),
-              ),
-              child: Row(
-                children: [
-                  Expanded(flex: 3, child: Text('Name', style: _headerStyle)),
-                  Expanded(flex: 2, child: Text('Mod Type', style: _headerStyle)),
-                  Expanded(flex: 2, child: Text('Mod Rate', style: _headerStyle)),
-                  Expanded(flex: 1, child: Text('Samples', style: _headerStyle)),
-                  Expanded(flex: 1, child: Text('F1', style: _headerStyle)),
-                  Expanded(flex: 1, child: Text('>90%', style: _headerStyle)),
-                  const SizedBox(width: 50), // Edit button space
-                ],
-              ),
-            ),
-            
-            // Table body
+            // Tab content
             Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: G20Colors.backgroundDark,
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
-                  border: Border.all(color: G20Colors.cardDark),
-                ),
-                child: ListView.builder(
-                  itemCount: filteredEntries.length,
-                  itemBuilder: (context, index) {
-                    final entry = filteredEntries[index];
-                    final isSelected = _selectedEntry?.id == entry.id;
-                    return InkWell(
-                      onTap: () => _showEditDialog(entry),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: isSelected ? G20Colors.primary.withOpacity(0.1) : (index.isEven ? G20Colors.surfaceDark.withOpacity(0.3) : Colors.transparent),
-                          border: Border(bottom: BorderSide(color: G20Colors.cardDark.withOpacity(0.5))),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: Text(
-                                entry.name,
-                                style: const TextStyle(color: G20Colors.textPrimaryDark, fontWeight: FontWeight.w500),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                entry.modType,
-                                style: TextStyle(
-                                  color: entry.modType == '--' ? G20Colors.textSecondaryDark : G20Colors.textPrimaryDark,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                entry.modRate != null ? '${entry.modRate!.toStringAsFixed(0)} sps' : '--',
-                                style: TextStyle(
-                                  color: entry.modRate == null ? G20Colors.textSecondaryDark : G20Colors.textPrimaryDark,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              flex: 1,
-                              child: Text(
-                                '${entry.sampleCount}',
-                                style: const TextStyle(color: G20Colors.textPrimaryDark),
-                              ),
-                            ),
-                            Expanded(
-                              flex: 1,
-                              child: Text(
-                                entry.f1Score != null ? entry.f1Score!.toStringAsFixed(2) : '--',
-                                style: TextStyle(
-                                  color: entry.f1Score != null ? G20Colors.success : G20Colors.textSecondaryDark,
-                                  fontWeight: entry.f1Score != null ? FontWeight.w600 : FontWeight.normal,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              flex: 1,
-                              child: Text(
-                                '${entry.timesAbove90}',
-                                style: const TextStyle(color: G20Colors.textPrimaryDark),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 50,
-                              child: IconButton(
-                                icon: const Icon(Icons.edit, size: 18),
-                                color: G20Colors.primary,
-                                onPressed: () => _showEditDialog(entry),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            
-            // Footer info
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '${filteredEntries.length} signals • Click row to edit',
-                style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12),
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildSignalsTab(),
+                  _buildModelsTab(),
+                ],
               ),
             ),
           ],
@@ -210,11 +240,388 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> {
     );
   }
 
+  Widget _buildSignalsTab() {
+    final entries = ref.watch(signalDatabaseProvider);
+    final filteredEntries = _searchQuery.isEmpty
+        ? entries
+        : entries.where((e) => e.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+
+    return Column(
+      children: [
+        // Search box
+        Row(
+          children: [
+            SizedBox(
+              width: 300,
+              child: TextField(
+                onChanged: (v) => setState(() => _searchQuery = v),
+                style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Search signals...',
+                  hintStyle: TextStyle(color: G20Colors.textSecondaryDark.withOpacity(0.5)),
+                  prefixIcon: const Icon(Icons.search, color: G20Colors.textSecondaryDark, size: 20),
+                  filled: true,
+                  fillColor: G20Colors.surfaceDark,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        
+        // Table header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: G20Colors.surfaceDark,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            border: Border.all(color: G20Colors.cardDark),
+          ),
+          child: Row(
+            children: [
+              Expanded(flex: 3, child: Text('Name', style: _headerStyle)),
+              Expanded(flex: 2, child: Text('Mod Type', style: _headerStyle)),
+              Expanded(flex: 2, child: Text('Mod Rate', style: _headerStyle)),
+              Expanded(flex: 1, child: Text('Samples', style: _headerStyle)),
+              Expanded(flex: 1, child: Text('F1', style: _headerStyle)),
+              Expanded(flex: 1, child: Text('>90%', style: _headerStyle)),
+              const SizedBox(width: 100), // Edit + Delete buttons
+            ],
+          ),
+        ),
+        
+        // Table body
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: G20Colors.backgroundDark,
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              border: Border.all(color: G20Colors.cardDark),
+            ),
+            child: ListView.builder(
+              itemCount: filteredEntries.length,
+              itemBuilder: (context, index) {
+                final entry = filteredEntries[index];
+                final isSelected = _selectedEntry?.id == entry.id;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? G20Colors.primary.withOpacity(0.1) : (index.isEven ? G20Colors.surfaceDark.withOpacity(0.3) : Colors.transparent),
+                    border: Border(bottom: BorderSide(color: G20Colors.cardDark.withOpacity(0.5))),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          entry.name,
+                          style: const TextStyle(color: G20Colors.textPrimaryDark, fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          entry.modType,
+                          style: TextStyle(
+                            color: entry.modType == '--' ? G20Colors.textSecondaryDark : G20Colors.textPrimaryDark,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          entry.modRate != null ? '${entry.modRate!.toStringAsFixed(0)} sps' : '--',
+                          style: TextStyle(
+                            color: entry.modRate == null ? G20Colors.textSecondaryDark : G20Colors.textPrimaryDark,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 1,
+                        child: Text(
+                          '${entry.sampleCount}',
+                          style: const TextStyle(color: G20Colors.textPrimaryDark),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 1,
+                        child: Text(
+                          entry.f1Score != null ? entry.f1Score!.toStringAsFixed(2) : '--',
+                          style: TextStyle(
+                            color: entry.f1Score != null ? G20Colors.success : G20Colors.textSecondaryDark,
+                            fontWeight: entry.f1Score != null ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 1,
+                        child: Text(
+                          '${entry.timesAbove90}',
+                          style: const TextStyle(color: G20Colors.textPrimaryDark),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 100,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, size: 18),
+                              color: G20Colors.primary,
+                              onPressed: () => _showEditDialog(entry),
+                              tooltip: 'Edit',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, size: 18),
+                              color: G20Colors.error,
+                              onPressed: () => _confirmDeleteSignal(entry),
+                              tooltip: 'Delete',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        
+        // Footer info
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            '${filteredEntries.length} signals • Click edit to modify, delete to remove',
+            style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModelsTab() {
+    if (_loadingModels) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: G20Colors.primary),
+            SizedBox(height: 16),
+            Text('Loading models...', style: TextStyle(color: G20Colors.textSecondaryDark)),
+          ],
+        ),
+      );
+    }
+
+    if (_models.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.model_training, size: 64, color: G20Colors.textSecondaryDark),
+            const SizedBox(height: 16),
+            const Text('No models found', style: TextStyle(color: G20Colors.textPrimaryDark, fontSize: 18)),
+            const SizedBox(height: 8),
+            const Text('Train a model to see it here', style: TextStyle(color: G20Colors.textSecondaryDark)),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _loadModels,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: G20Colors.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        // Table header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: G20Colors.surfaceDark,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            border: Border.all(color: G20Colors.cardDark),
+          ),
+          child: Row(
+            children: [
+              Expanded(flex: 4, child: Text('Model Name', style: _headerStyle)),
+              Expanded(flex: 1, child: Text('Type', style: _headerStyle)),
+              Expanded(flex: 2, child: Text('Size', style: _headerStyle)),
+              Expanded(flex: 3, child: Text('Last Modified', style: _headerStyle)),
+              const SizedBox(width: 50), // Delete button
+            ],
+          ),
+        ),
+        
+        // Table body
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: G20Colors.backgroundDark,
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+              border: Border.all(color: G20Colors.cardDark),
+            ),
+            child: ListView.builder(
+              itemCount: _models.length,
+              itemBuilder: (context, index) {
+                final model = _models[index];
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: index.isEven ? G20Colors.surfaceDark.withOpacity(0.3) : Colors.transparent,
+                    border: Border(bottom: BorderSide(color: G20Colors.cardDark.withOpacity(0.5))),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 4,
+                        child: Row(
+                          children: [
+                            Icon(
+                              _getModelIcon(model.type),
+                              size: 18,
+                              color: _getModelColor(model.type),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                model.name,
+                                style: const TextStyle(color: G20Colors.textPrimaryDark, fontWeight: FontWeight.w500),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        flex: 1,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _getModelColor(model.type).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            model.type,
+                            style: TextStyle(
+                              color: _getModelColor(model.type),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          _formatFileSize(model.size),
+                          style: const TextStyle(color: G20Colors.textPrimaryDark),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          _formatDate(model.modified),
+                          style: const TextStyle(color: G20Colors.textSecondaryDark),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 50,
+                        child: IconButton(
+                          icon: const Icon(Icons.delete, size: 18),
+                          color: G20Colors.error,
+                          onPressed: () => _confirmDeleteModel(model),
+                          tooltip: 'Delete model',
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        
+        // Footer info
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            '${_models.length} models • Looking in models/ directory',
+            style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  IconData _getModelIcon(String type) {
+    switch (type) {
+      case 'ONNX': return Icons.hub;
+      case 'ENGINE': return Icons.bolt;
+      case 'PT':
+      case 'PTH': return Icons.memory;
+      default: return Icons.model_training;
+    }
+  }
+
+  Color _getModelColor(String type) {
+    switch (type) {
+      case 'ONNX': return Colors.orange;
+      case 'ENGINE': return Colors.green;
+      case 'PT':
+      case 'PTH': return Colors.blue;
+      default: return G20Colors.textSecondaryDark;
+    }
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+
+  String _formatDate(DateTime dt) {
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
+           '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
   TextStyle get _headerStyle => const TextStyle(
     color: G20Colors.textSecondaryDark,
     fontSize: 12,
     fontWeight: FontWeight.w600,
   );
+}
+
+/// Model info for the models tab
+class ModelInfo {
+  final String name;
+  final String path;
+  final int size;
+  final DateTime modified;
+  final String type;
+
+  ModelInfo({
+    required this.name,
+    required this.path,
+    required this.size,
+    required this.modified,
+    required this.type,
+  });
 }
 
 /// Edit dialog for signal metadata

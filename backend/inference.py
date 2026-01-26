@@ -17,6 +17,7 @@ from typing import List, Tuple, Dict, Any, Optional
 
 import torch
 import torch.nn.functional as F
+from torchvision.models.detection.rpn import AnchorGenerator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("g20.inference")
@@ -154,8 +155,23 @@ class InferenceEngine:
         
         # ResNet18 backbone with 5 trainable layers (matches tensorcade training)
         backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=5)
+        
+        # Custom anchor generator for narrow signal boxes (~12x84 pixels, aspect ~0.15)
+        # MUST match training config in training/service.py:
+        # - 5 sizes per FPN level × 4 aspect ratios = 20 anchors per location
+        # - Default FasterRCNN only has 3 anchors (1 size × 3 ratios)
+        anchor_generator = AnchorGenerator(
+            sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
+            aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5  # Same aspects for all 5 FPN levels
+        )
+        
         self._pytorch_model = torchvision.models.detection.FasterRCNN(
-            backbone, num_classes=self.num_classes
+            backbone,
+            num_classes=self.num_classes,
+            rpn_anchor_generator=anchor_generator,
+            # Lower RPN thresholds for small objects (matches training)
+            rpn_fg_iou_thresh=0.5,
+            rpn_bg_iou_thresh=0.3,
         )
         
         state = torch.load(self.model_path, map_location=self.device, weights_only=False)
@@ -522,7 +538,20 @@ def export_to_tensorrt(
     from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
     
     backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=3)
-    model = torchvision.models.detection.FasterRCNN(backbone, num_classes=num_classes)
+    
+    # Custom anchor generator - MUST match training config in training/service.py
+    anchor_generator = AnchorGenerator(
+        sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
+        aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5  # Same aspects for all 5 FPN levels
+    )
+    
+    model = torchvision.models.detection.FasterRCNN(
+        backbone,
+        num_classes=num_classes,
+        rpn_anchor_generator=anchor_generator,
+        rpn_fg_iou_thresh=0.5,
+        rpn_bg_iou_thresh=0.3,
+    )
     model.load_state_dict(torch.load(pytorch_path, map_location="cpu", weights_only=False))
     model.eval()
     

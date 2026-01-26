@@ -247,24 +247,29 @@ final soiVisibilityProvider = Provider.family<bool, String>((ref, soiName) {
 /// Fixed color palette - NO REPEATS
 /// Each known class gets a specific color, UNKs get a generated unique color
 const Map<String, Color> _soiColorPalette = {
-  // Threat signals - warm colors
+  // Creamy family - each gets a UNIQUE color
   'creamy_chicken': Color(0xFFFF5722),  // Deep Orange
+  'creamy_pork': Color(0xFF4CAF50),     // Green
+  'creamy_beef': Color(0xFF2196F3),     // Blue
+  'creamy_fish': Color(0xFF9C27B0),     // Purple
+  'creamy_lamb': Color(0xFF00BCD4),     // Cyan
+  'creamy_turkey': Color(0xFFE91E63),   // Pink
   
   // Known protocols - distinct colors
-  'LTE_UPLINK': Color(0xFF2196F3),      // Blue
-  'WIFI_24': Color(0xFF4CAF50),         // Green
-  'BLUETOOTH': Color(0xFF9C27B0),       // Purple
-  'ZIGBEE': Color(0xFF00BCD4),          // Cyan
-  'LORA': Color(0xFFFFEB3B),            // Yellow
-  'GPS_L1': Color(0xFF795548),          // Brown
-  'ADSB': Color(0xFF607D8B),            // Blue Grey
-  'DMR': Color(0xFFE91E63),             // Pink
-  'P25': Color(0xFF673AB7),             // Deep Purple
-  'TETRA': Color(0xFF009688),           // Teal
-  'DECT': Color(0xFFFF9800),            // Orange
-  'ISM_433': Color(0xFF8BC34A),         // Light Green
-  'ISM_868': Color(0xFF03A9F4),         // Light Blue
-  'ISM_915': Color(0xFFCDDC39),         // Lime
+  'lte_uplink': Color(0xFF3F51B5),      // Indigo
+  'wifi_24': Color(0xFF8BC34A),         // Light Green
+  'bluetooth': Color(0xFF673AB7),       // Deep Purple
+  'zigbee': Color(0xFF009688),          // Teal
+  'lora': Color(0xFFFFEB3B),            // Yellow
+  'gps_l1': Color(0xFF795548),          // Brown
+  'adsb': Color(0xFF607D8B),            // Blue Grey
+  'dmr': Color(0xFFF44336),             // Red
+  'p25': Color(0xFF7B1FA2),             // Purple variant
+  'tetra': Color(0xFF00796B),           // Teal variant
+  'dect': Color(0xFFFF9800),            // Orange
+  'ism_433': Color(0xFF558B2F),         // Dark Green
+  'ism_868': Color(0xFF0288D1),         // Light Blue variant
+  'ism_915': Color(0xFFCDDC39),         // Lime
 };
 
 /// Golden ratio for generating visually distinct hues
@@ -285,10 +290,7 @@ Color getSOIColor(String soiName) {
     }
   }
   
-  // Check for partial matches (creamy_chicken variants)
-  if (lowerName.contains('creamy') || lowerName.contains('chicken')) {
-    return _soiColorPalette['creamy_chicken']!;
-  }
+  // NO PARTIAL MATCHES - each signal class gets its own unique color
   
   // For UNK signals (unk_DTG_freq format) - generate unique color based on hash
   // Use golden ratio to spread hues evenly and avoid collisions

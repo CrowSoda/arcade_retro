@@ -171,6 +171,8 @@ try:
     from training.service import TrainingService, TrainingProgress
     from training.sample_manager import SampleManager
     from training.splits import SplitManager
+    from dsp.subband_extractor import SubbandExtractor, ExtractionParams, extract_subband_from_file, _read_rfcap_header
+    from dsp.simple_extract import extract_subband as simple_extract_subband
     HYDRA_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"Hydra modules not available: {e}")
@@ -1219,22 +1221,121 @@ async def ws_training_handler(websocket):
     import traceback
     
     print("[Training] Handler started", flush=True)
+    print(f"[Training] HYDRA_AVAILABLE = {HYDRA_AVAILABLE}", flush=True)
     
-    if not HYDRA_AVAILABLE:
+    # Wrap EVERYTHING in try/except to ensure we send error before closing
+    try:
+        await _ws_training_handler_impl(websocket)
+    except Exception as e:
+        print(f"[Training] CRITICAL ERROR in handler: {e}", flush=True)
+        traceback.print_exc()
+        try:
+            await websocket.send(json.dumps({
+                "type": "init_error",
+                "message": f"CRITICAL HANDLER ERROR:\n{e}\n\n{traceback.format_exc()}",
+            }))
+            # Wait a moment for message to send before closing
+            await asyncio.sleep(0.5)
+        except Exception as send_err:
+            print(f"[Training] Failed to send error to client: {send_err}", flush=True)
+        # DON'T re-raise - just let handler close gracefully
+
+
+async def _ws_training_handler_impl(websocket):
+    """Actual implementation of training handler."""
+    import json
+    import traceback
+    
+    print("[Training] _ws_training_handler_impl ENTRY", flush=True)
+    
+    # Don't immediately close - try to initialize services
+    training_service = None
+    version_manager = None
+    sample_manager = None
+    split_manager = None
+    
+    # Store any initialization errors so we can send them to the client
+    init_errors = []
+    
+    # Always try to import SampleManager first (it has minimal dependencies)
+    try:
+        from training.sample_manager import SampleManager
+        sample_manager = SampleManager(str(BASE_DIR / "training_data" / "signals"))
+        print(f"[Training] SampleManager initialized: {sample_manager.base_dir}", flush=True)
+    except Exception as e:
+        error_msg = f"SampleManager failed: {e}\n{traceback.format_exc()}"
+        init_errors.append(error_msg)
+        print(f"[Training] {error_msg}", flush=True)
+    
+    if HYDRA_AVAILABLE:
+        # Full Hydra available - initialize all services (TrainingService already imported globally)
+        print(f"[Training] HYDRA_AVAILABLE=True, initializing services...", flush=True)
+        print(f"[Training]   MODELS_DIR: {MODELS_DIR}", flush=True)
+        print(f"[Training]   training_data_dir: {BASE_DIR / 'training_data' / 'signals'}", flush=True)
+        try:
+            print("[Training]   Creating TrainingService...", flush=True)
+            training_service = TrainingService(
+                models_dir=str(MODELS_DIR),
+                training_data_dir=str(BASE_DIR / "training_data" / "signals")
+            )
+            print("[Training]   OK TrainingService created", flush=True)
+            
+            print("[Training]   Creating VersionManager...", flush=True)
+            version_manager = VersionManager(str(MODELS_DIR))
+            print("[Training]   OK VersionManager created", flush=True)
+            
+            print("[Training]   Creating SplitManager...", flush=True)
+            split_manager = SplitManager(str(BASE_DIR / "training_data" / "signals"))
+            print("[Training]   OK SplitManager created", flush=True)
+            
+            print("[Training] OK Full training services initialized", flush=True)
+        except Exception as e:
+            error_msg = f"Training services failed: {e}\n{traceback.format_exc()}"
+            init_errors.append(error_msg)
+            print(f"[Training] FAILED: {error_msg}", flush=True)
+    else:
+        # HYDRA_AVAILABLE=False - try importing training-related modules separately
+        print("[Training] HYDRA_AVAILABLE=False, trying minimal imports...", flush=True)
+        try:
+            from hydra.version_manager import VersionManager as VM
+            version_manager = VM(str(MODELS_DIR))
+            print("[Training] VersionManager OK", flush=True)
+        except Exception as e:
+            error_msg = f"VersionManager failed: {e}\n{traceback.format_exc()}"
+            init_errors.append(error_msg)
+            print(f"[Training] {error_msg}", flush=True)
+        
+        try:
+            from training.splits import SplitManager as SM
+            split_manager = SM(str(BASE_DIR / "training_data" / "signals"))
+            print("[Training] SplitManager OK", flush=True)
+        except Exception as e:
+            error_msg = f"SplitManager failed: {e}\n{traceback.format_exc()}"
+            init_errors.append(error_msg)
+            print(f"[Training] {error_msg}", flush=True)
+        
+        try:
+            from training.service import TrainingService as TS
+            training_service = TS(
+                models_dir=str(MODELS_DIR),
+                training_data_dir=str(BASE_DIR / "training_data" / "signals")
+            )
+            print("[Training] TrainingService OK", flush=True)
+        except Exception as e:
+            error_msg = f"TrainingService failed: {e}\n{traceback.format_exc()}"
+            init_errors.append(error_msg)
+            print(f"[Training] {error_msg}", flush=True)
+    
+    # If there were any init errors, send them to the client immediately
+    if init_errors:
+        full_error = "INITIALIZATION ERRORS:\n" + "\n---\n".join(init_errors)
+        print(f"[Training] Sending init errors to client", flush=True)
         await websocket.send(json.dumps({
-            "type": "error",
-            "message": "Hydra training modules not available"
+            "type": "init_error",
+            "message": full_error,
+            "sample_manager_ok": sample_manager is not None,
+            "training_service_ok": training_service is not None,
         }))
-        return
-    
-    # Initialize services
-    training_service = TrainingService(
-        models_dir=str(MODELS_DIR),
-        training_data_dir=str(BASE_DIR / "training_data" / "signals")
-    )
-    version_manager = VersionManager(str(MODELS_DIR))
-    sample_manager = SampleManager(str(BASE_DIR / "training_data" / "signals"))
-    split_manager = SplitManager(str(BASE_DIR / "training_data" / "signals"))
     
     training_task = None
     
@@ -1272,7 +1373,8 @@ async def ws_training_handler(websocket):
             try:
                 data = json.loads(message)
                 cmd = data.get("command")
-                print(f"[Training] Command: {cmd}", flush=True)
+                if cmd not in ("save_sample",):  # Silent commands
+                    print(f"[Training] Command: {cmd}", flush=True)
                 
                 # =====================
                 # Registry & Versions
@@ -1367,6 +1469,13 @@ async def ws_training_handler(websocket):
                         }))
                         continue
                     
+                    if training_service is None:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "training_service not initialized - training modules failed to import"
+                        }))
+                        continue
+                    
                     if training_service.is_training:
                         await websocket.send(json.dumps({
                             "type": "error",
@@ -1414,12 +1523,21 @@ async def ws_training_handler(websocket):
                     training_task = asyncio.create_task(run_training())
                 
                 elif cmd == "cancel_training":
-                    training_service.cancel_training()
+                    if training_service is not None:
+                        training_service.cancel_training()
                     await websocket.send(json.dumps({
                         "type": "training_cancelled"
                     }))
                 
                 elif cmd == "get_training_status":
+                    if training_service is None:
+                        await websocket.send(json.dumps({
+                            "type": "training_status",
+                            "is_training": False,
+                            "current_signal": None,
+                            "error": "training_service not initialized"
+                        }))
+                        continue
                     status = training_service.get_training_status()
                     await websocket.send(json.dumps({
                         "type": "training_status",
@@ -1443,21 +1561,32 @@ async def ws_training_handler(websocket):
                         }))
                         continue
                     
+                    if sample_manager is None:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "sample_manager not initialized - training modules failed to import"
+                        }))
+                        continue
+                    
                     try:
-                        sample_id = sample_manager.save_sample(
+                        sample_id, is_new = sample_manager.save_sample(
                             signal_name, iq_data_b64, boxes, metadata
                         )
+                        # Silent - no spam
                         
                         await websocket.send(json.dumps({
                             "type": "sample_saved",
                             "signal_name": signal_name,
                             "sample_id": sample_id,
+                            "is_new": is_new,  # False if duplicate was skipped
                             "total_samples": sample_manager.get_sample_count(signal_name)
                         }))
                     except Exception as e:
+                        print(f"[Training] ERROR saving sample: {e}", flush=True)
+                        traceback.print_exc()
                         await websocket.send(json.dumps({
                             "type": "error",
-                            "message": str(e)
+                            "message": f"save_sample failed: {str(e)}"
                         }))
                 
                 elif cmd == "get_samples":
@@ -1498,6 +1627,125 @@ async def ws_training_handler(websocket):
                         "sample_id": sample_id,
                         "message": None if deleted else "Sample not found"
                     }))
+                
+                # =====================
+                # Sub-Band Extraction
+                # =====================
+                
+                elif cmd == "extract_subband":
+                    # Extract sub-band from RFCAP file
+                    # {
+                    #   "command": "extract_subband",
+                    #   "source_file": "captures/MAN_123456Z_825MHz.rfcap",
+                    #   "output_file": "training_data/signals/unk/samples/0001.rfcap",
+                    #   "center_offset_hz": 500000,
+                    #   "bandwidth_hz": 2000000,
+                    #   "start_sec": 5.0,
+                    #   "duration_sec": 10.0,
+                    #   "stopband_db": 60.0  (optional)
+                    # }
+                    source_file = data.get("source_file")
+                    output_file = data.get("output_file")
+                    center_offset_hz = data.get("center_offset_hz", 0)
+                    bandwidth_hz = data.get("bandwidth_hz")
+                    start_sec = data.get("start_sec", 0)
+                    duration_sec = data.get("duration_sec")
+                    stopband_db = data.get("stopband_db", 60.0)
+                    
+                    if not source_file or not bandwidth_hz:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "source_file and bandwidth_hz required"
+                        }))
+                        continue
+                    
+                    # Resolve paths relative to BASE_DIR
+                    source_path = str(BASE_DIR / source_file) if not os.path.isabs(source_file) else source_file
+                    output_path = str(BASE_DIR / output_file) if output_file and not os.path.isabs(output_file) else output_file
+                    
+                    # Generate output path if not specified
+                    if not output_path:
+                        output_dir = BASE_DIR / "training_data" / "extracted"
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                        output_path = str(output_dir / f"subband_{timestamp}.rfcap")
+                    else:
+                        # Ensure output directory exists
+                        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    
+                    if not os.path.exists(source_path):
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": f"Source file not found: {source_path}"
+                        }))
+                        continue
+                    
+                    # Send progress updates
+                    async def send_extraction_progress(progress):
+                        try:
+                            await websocket.send(json.dumps({
+                                "type": "extraction_progress",
+                                "progress": progress,
+                                "source_file": source_file,
+                            }))
+                        except Exception as e:
+                            print(f"[Training] Extraction progress send error: {e}", flush=True)
+                    
+                    def progress_callback(p):
+                        try:
+                            asyncio.get_event_loop().create_task(send_extraction_progress(p))
+                        except RuntimeError:
+                            pass
+                    
+                    try:
+                        # Read source header to get original center and sample rate
+                        source_header = _read_rfcap_header(source_path)
+                        original_center_hz = source_header['center_freq']
+                        original_sample_rate = source_header['sample_rate']
+                        new_center_hz = original_center_hz + center_offset_hz
+                        
+                        print(f"[Extract] Using FAST simple_extract: {bandwidth_hz/1e6:.2f}MHz BW, offset {center_offset_hz/1e6:.2f}MHz", flush=True)
+                        print(f"[Extract] Original: center={original_center_hz/1e6:.2f}MHz, rate={original_sample_rate/1e6:.2f}Msps", flush=True)
+                        print(f"[Extract] Target: center={new_center_hz/1e6:.2f}MHz, bw={bandwidth_hz/1e6:.2f}MHz", flush=True)
+                        
+                        # Run FAST extraction (101 taps vs 4095 taps)
+                        result = await asyncio.to_thread(
+                            simple_extract_subband,
+                            input_path=source_path,
+                            output_path=output_path,
+                            original_center_hz=original_center_hz,
+                            original_sample_rate=original_sample_rate,
+                            new_center_hz=new_center_hz,
+                            new_bandwidth_hz=bandwidth_hz,
+                            num_taps=101,  # Fast filter
+                            progress_callback=progress_callback,  # Track progress!
+                        )
+                        
+                        print(f"[Extract] DONE! Output: {result['output_path']}", flush=True)
+                        print(f"[Extract] Output rate: {result['new_sample_rate']/1e6:.2f}Msps, samples: {result['output_samples']}", flush=True)
+                        
+                        await websocket.send(json.dumps({
+                            "type": "subband_extracted",
+                            "output_file": result['output_path'],
+                            "source_rate_hz": result['original_sample_rate'],
+                            "output_rate_hz": result['new_sample_rate'],
+                            "bandwidth_hz": result['new_bandwidth_hz'],
+                            "center_offset_hz": result['shift_hz'],
+                            "output_center_freq_hz": result['new_center_hz'],
+                            "input_samples": result['input_samples'],
+                            "output_samples": result['output_samples'],
+                            "decimation_ratio": result['decimation'],
+                            "filter_taps": result['filter_taps'],
+                            "processing_time_sec": 0.0,  # simple_extract doesn't track this
+                        }))
+                    except Exception as e:
+                        print(f"[Training] Extraction error: {e}", flush=True)
+                        traceback.print_exc()
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "command": "extract_subband",
+                            "message": str(e)
+                        }))
                 
                 else:
                     await websocket.send(json.dumps({
@@ -1616,11 +1864,13 @@ async def run_websocket_server(port: int = 0):
     try:
         # Let OS pick port if port=0, or use specified port
         # Use ws_router to dispatch based on path
+        # max_size=100MB to handle large IQ data for training samples
         server = await websockets.serve(
             ws_router,
             "127.0.0.1",  # localhost only
             port,
-            reuse_address=True
+            reuse_address=True,
+            max_size=100 * 1024 * 1024,  # 100 MB max message size
         )
         
         # Register server for cleanup

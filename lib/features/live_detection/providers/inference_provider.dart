@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/grpc/inference_client.dart';
 import '../../../core/services/backend_launcher.dart';
+import '../../../core/database/signal_database.dart';
 import '../../settings/settings_screen.dart';
 import 'detection_provider.dart' as det;
 import 'waterfall_provider.dart';
@@ -150,6 +151,22 @@ class UnifiedInferenceNotifier extends StateNotifier<LiveInferenceState> {
     if (detections.isNotEmpty) {
       notifier.addDetections(detections);
       debugPrint('[Inference] +${detections.length} @ PTS ${detectionPts.toStringAsFixed(1)}s');
+      
+      // Log detailed detection records to database for high-confidence detections
+      final dbNotifier = _ref.read(signalDatabaseProvider.notifier);
+      for (final detection in detections) {
+        if (detection.confidence >= 0.9) {
+          // Log full detection details - score, frequency, bandwidth, location
+          dbNotifier.addDetectionRecord(
+            signalName: detection.className,
+            score: detection.confidence,
+            freqMHz: detection.freqMHz,
+            bandwidthMHz: detection.bandwidthMHz,
+            mgrsLocation: detection.mgrsLocation,
+            trackId: detection.trackId,
+          );
+        }
+      }
     }
   }
 

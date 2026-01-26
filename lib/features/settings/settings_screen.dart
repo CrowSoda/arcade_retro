@@ -376,28 +376,28 @@ class _AutoTuneDelaySelector extends ConsumerWidget {
               label: 'Off',
               value: null,
               selected: delay == null,
-              onTap: () => ref.read(autoTuneDelayProvider.notifier).state = null,
+              onTap: () => ref.read(autoTuneDelayProvider.notifier).setValue(null),
             ),
             const SizedBox(width: 8),
             _DelayOption(
               label: '1s',
               value: 1,
               selected: delay == 1,
-              onTap: () => ref.read(autoTuneDelayProvider.notifier).state = 1,
+              onTap: () => ref.read(autoTuneDelayProvider.notifier).setValue(1),
             ),
             const SizedBox(width: 8),
             _DelayOption(
               label: '2s',
               value: 2,
               selected: delay == 2,
-              onTap: () => ref.read(autoTuneDelayProvider.notifier).state = 2,
+              onTap: () => ref.read(autoTuneDelayProvider.notifier).setValue(2),
             ),
             const SizedBox(width: 8),
             _DelayOption(
               label: '5s',
               value: 5,
               selected: delay == 5,
-              onTap: () => ref.read(autoTuneDelayProvider.notifier).state = 5,
+              onTap: () => ref.read(autoTuneDelayProvider.notifier).setValue(5),
             ),
           ],
         ),
@@ -510,28 +510,28 @@ class _WaterfallTimeSpanSelector extends ConsumerWidget {
               label: '200ms',
               value: 0.2,
               selected: (timeSpan - 0.2).abs() < 0.05,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 0.2,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(0.2),
             ),
             const SizedBox(width: 6),
             _TimeSpanOption(
               label: '500ms',
               value: 0.5,
               selected: (timeSpan - 0.5).abs() < 0.05,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 0.5,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(0.5),
             ),
             const SizedBox(width: 6),
             _TimeSpanOption(
               label: '1s',
               value: 1.0,
               selected: (timeSpan - 1.0).abs() < 0.1,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 1.0,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(1.0),
             ),
             const SizedBox(width: 6),
             _TimeSpanOption(
               label: '2s',
               value: 2.0,
               selected: (timeSpan - 2.0).abs() < 0.1,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 2.0,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(2.0),
             ),
           ],
         ),
@@ -543,28 +543,28 @@ class _WaterfallTimeSpanSelector extends ConsumerWidget {
               label: '5s',
               value: 5.0,
               selected: (timeSpan - 5.0).abs() < 0.1,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 5.0,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(5.0),
             ),
             const SizedBox(width: 6),
             _TimeSpanOption(
               label: '10s',
               value: 10.0,
               selected: (timeSpan - 10.0).abs() < 0.1,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 10.0,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(10.0),
             ),
             const SizedBox(width: 6),
             _TimeSpanOption(
               label: '30s',
               value: 30.0,
               selected: (timeSpan - 30.0).abs() < 0.1,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 30.0,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(30.0),
             ),
             const SizedBox(width: 6),
             _TimeSpanOption(
               label: '60s',
               value: 60.0,
               selected: (timeSpan - 60.0).abs() < 0.1,
-              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).state = 60.0,
+              onTap: () => ref.read(waterfallTimeSpanProvider.notifier).setValue(60.0),
             ),
           ],
         ),
@@ -623,8 +623,8 @@ class _WaterfallFpsSelector extends ConsumerWidget {
   void _setFps(WidgetRef ref, int newFps) {
     debugPrint('[Settings] FPS button tapped: $newFps');
     
-    // Update provider state
-    ref.read(waterfallFpsProvider.notifier).state = newFps;
+    // Update provider state (persisted)
+    ref.read(waterfallFpsProvider.notifier).setValue(newFps);
     
     // DIRECT CALL to backend - no listener needed!
     ref.read(videoStreamProvider.notifier).setFps(newFps);
@@ -771,8 +771,8 @@ class _ScoreThresholdSelector extends ConsumerWidget {
   void _setScoreThreshold(WidgetRef ref, double newThreshold) {
     debugPrint('[Settings] Score threshold changed: ${(newThreshold * 100).round()}%');
     
-    // Update provider state
-    ref.read(scoreThresholdProvider.notifier).state = newThreshold;
+    // Update provider state (persisted)
+    ref.read(scoreThresholdProvider.notifier).setValue(newThreshold);
     
     // DIRECT CALL to backend - no listener needed!
     ref.read(videoStreamProvider.notifier).setScoreThreshold(newThreshold);
@@ -916,20 +916,11 @@ class _ThresholdOption extends StatelessWidget {
 class _FftSizeSelector extends ConsumerWidget {
   const _FftSizeSelector();
 
-  Future<void> _setFftSize(WidgetRef ref, int newSize) async {
+  void _setFftSize(WidgetRef ref, int newSize) {
     debugPrint('[Settings] FFT size button tapped: $newSize');
     
-    // Update provider state
-    ref.read(waterfallFftSizeProvider.notifier).state = newSize;
-    
-    // Save to SharedPreferences for persistence
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('waterfall_fft_size', newSize);
-      debugPrint('[Settings] FFT size saved to preferences: $newSize');
-    } catch (e) {
-      debugPrint('[Settings] Failed to save FFT size: $e');
-    }
+    // Update provider state (persisted automatically)
+    ref.read(waterfallFftSizeProvider.notifier).setValue(newSize);
     
     // Send to backend (includes cuFFT warmup - may take 100-500ms)
     ref.read(videoStreamProvider.notifier).setFftSize(newSize);
@@ -1073,10 +1064,10 @@ class _DbRangeSelector extends ConsumerWidget {
 
   void _setDbRange(WidgetRef ref, {double? minDb, double? maxDb}) {
     if (minDb != null) {
-      ref.read(waterfallMinDbProvider.notifier).state = minDb;
+      ref.read(waterfallMinDbProvider.notifier).setValue(minDb);
     }
     if (maxDb != null) {
-      ref.read(waterfallMaxDbProvider.notifier).state = maxDb;
+      ref.read(waterfallMaxDbProvider.notifier).setValue(maxDb);
     }
     
     // Send to backend
@@ -1216,8 +1207,8 @@ class _ColormapSelector extends ConsumerWidget {
   void _setColormap(WidgetRef ref, int newColormap) {
     debugPrint('[Settings] Colormap changed: ${colormapNames[newColormap]}');
     
-    // Update provider state
-    ref.read(waterfallColormapProvider.notifier).state = newColormap;
+    // Update provider state (persisted)
+    ref.read(waterfallColormapProvider.notifier).setValue(newColormap);
     
     // Send to backend
     ref.read(videoStreamProvider.notifier).setColormap(newColormap);
@@ -1307,7 +1298,7 @@ class _StatsOverlayToggle extends ConsumerWidget {
       ),
       value: showStats,
       onChanged: (v) {
-        ref.read(showStatsOverlayProvider.notifier).state = v;
+        ref.read(showStatsOverlayProvider.notifier).setValue(v);
       },
       contentPadding: EdgeInsets.zero,
     );
@@ -1334,7 +1325,7 @@ class _SkipFirstFrameToggle extends ConsumerWidget {
       ),
       value: skipFirst,
       onChanged: (v) {
-        ref.read(skipFirstWaterfallFrameProvider.notifier).state = v;
+        ref.read(skipFirstWaterfallFrameProvider.notifier).setValue(v);
         // Notify video stream provider
         ref.read(videoStreamProvider.notifier).setSkipFirstFrame(v);
         debugPrint('[Settings] Skip first frame: $v');

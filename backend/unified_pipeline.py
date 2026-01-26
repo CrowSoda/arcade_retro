@@ -959,8 +959,8 @@ class VideoStreamServer:
                     # === PERF TIMING: Total frame time ===
                     t_total = (time.perf_counter() - frame_start) * 1000
                     
-                    # Print timing every 30 frames (with detailed GPU FFT breakdown)
-                    if frame_count % 30 == 0:
+                    # Print timing every 300 frames (~10 seconds at 30fps) to reduce log spam
+                    if frame_count % 300 == 0 and False:  # DISABLED - too spammy
                         fft_stats = self.pipeline.get_fft_timing_stats()
                         print(f"[PERF-PY] Frame {frame_count}: iq={t_iq_read:.1f}ms "
                               f"fft={t_fft:.1f}ms (prep={fft_stats['prep_ms']:.1f}+gpu={fft_stats['gpu_ms']:.1f}) "
@@ -1024,7 +1024,13 @@ class VideoStreamServer:
             await websocket.send(bytes([self.MSG_DETECTION]) + msg.encode())
             
         except Exception as e:
-            logger.error(f"[INFERENCE ERROR] Frame {frame_id}: {e}")
+            # Only log "No heads loaded" once to avoid spam
+            if "No heads loaded" in str(e):
+                if not getattr(self, '_no_heads_warned', False):
+                    logger.warning("[INFERENCE] No heads loaded - waiting for load_heads command")
+                    self._no_heads_warned = True
+            else:
+                logger.error(f"[INFERENCE ERROR] Frame {frame_id}: {e}")
     
     async def _run_inference_async(self, websocket, iq_data, pts, frame_id):
         """Run inference in background thread with timeout."""
@@ -1088,7 +1094,13 @@ class VideoStreamServer:
             await websocket.send(bytes([self.MSG_DETECTION]) + msg.encode())
             
         except Exception as e:
-            logger.error(f"[INFERENCE ERROR] Frame {frame_id}: {e}")
+            # Only log "No heads loaded" once to avoid spam
+            if "No heads loaded" in str(e):
+                if not getattr(self, '_no_heads_warned', False):
+                    logger.warning("[INFERENCE] No heads loaded - waiting for load_heads command")
+                    self._no_heads_warned = True
+            else:
+                logger.error(f"[INFERENCE ERROR] Frame {frame_id}: {e}")
     
     def stop(self):
         """Stop the pipeline."""

@@ -202,10 +202,11 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       // Write PID file for tracking (used to cleanup stale processes on restart)
       await _writePidFile(pid);
 
-      // Capture stdout - SILENTLY (no debugPrint)
+      // Capture stdout - PRINT TO CONSOLE for debugging
       _stdoutSub = _process!.stdout
           .transform(const SystemEncoding().decoder)
           .listen((data) {
+        print('[Python] $data');  // PRINT SO WE CAN SEE IT
         _addLog('[OUT] $data');
         
         // Parse WS_PORT from server stdout (KISS auto-discovery)
@@ -224,10 +225,11 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
         }
       });
 
-      // Capture stderr - SILENTLY
+      // Capture stderr - PRINT TO CONSOLE for debugging
       _stderrSub = _process!.stderr
           .transform(const SystemEncoding().decoder)
           .listen((data) {
+        print('[Python ERR] $data');  // PRINT ERRORS SO WE CAN SEE THEM
         _addLog('[ERR] $data');
       });
 

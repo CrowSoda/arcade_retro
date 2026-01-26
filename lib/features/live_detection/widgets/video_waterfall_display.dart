@@ -861,6 +861,7 @@ void _showDurationDialogAfterDraw(BuildContext context, WidgetRef ref) {
 }
 
 /// Duration dialog shown AFTER drawing - selecting duration starts the capture
+/// Now includes sub-band extraction options for CNN training data
 class _PostDrawDurationDialog extends ConsumerStatefulWidget {
   final double centerFreqMHz;
 
@@ -872,8 +873,10 @@ class _PostDrawDurationDialog extends ConsumerStatefulWidget {
 
 class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog> {
   int _durationMinutes = 1;  // Default 1 min
+  bool _extractNarrowband = true;  // Default: extract for training
   
   static const _durations = [1, 2, 5, 10];  // minutes
+  static const _sourceBandwidthHz = 20e6;  // 20 MHz capture bandwidth
 
   /// Calculate center frequency from the drawn box, not the current view
   double get boxCenterFreqMHz {
@@ -882,96 +885,173 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
     
     if (!captureState.hasPendingBox) return widget.centerFreqMHz;
     
-    // Box X positions are normalized 0-1 representing the frequency axis
-    // x1 = left edge, x2 = right edge (may be swapped if drawn right-to-left)
     final x1 = captureState.pendingBoxX1!;
     final x2 = captureState.pendingBoxX2!;
     final boxCenterNorm = (x1 + x2) / 2;
     
-    // Convert to frequency: left = centerFreq - BW/2, right = centerFreq + BW/2
     final lowFreq = sdrConfig.centerFreqMHz - sdrConfig.bandwidthMHz / 2;
     final boxCenterFreq = lowFreq + (boxCenterNorm * sdrConfig.bandwidthMHz);
     
     return boxCenterFreq;
   }
+  
+  /// Calculate extraction parameters from drawn box
+  Map<String, double> get extractionParams {
+    final captureState = ref.read(manualCaptureProvider);
+    final sdrConfig = ref.read(sdrConfigProvider);
+    
+    if (!captureState.hasPendingBox) {
+      return {
+        'center_offset_hz': 0.0,
+        'bandwidth_hz': _sourceBandwidthHz,
+        'output_rate_mhz': 20.0,
+        'decimation_ratio': 1.0,
+      };
+    }
+    
+    final x1 = captureState.pendingBoxX1!;
+    final x2 = captureState.pendingBoxX2!;
+    final boxCenterNorm = (x1 + x2) / 2;
+    final centerOffsetHz = (boxCenterNorm - 0.5) * sdrConfig.bandwidthMHz * 1e6;
+    final boxWidthNorm = (x2 - x1).abs();
+    final signalBandwidthHz = boxWidthNorm * sdrConfig.bandwidthMHz * 1e6;
+    var extractBandwidthHz = (signalBandwidthHz * 1.2).clamp(500e3, _sourceBandwidthHz);
+    final outputRateHz = extractBandwidthHz * 2.5;
+    final outputRateMHz = outputRateHz / 1e6;
+    final decimationRatio = _sourceBandwidthHz / outputRateHz;
+    
+    return {
+      'center_offset_hz': centerOffsetHz,
+      'bandwidth_hz': extractBandwidthHz,
+      'output_rate_mhz': outputRateMHz,
+      'decimation_ratio': decimationRatio,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
     final captureState = ref.watch(manualCaptureProvider);
+    final params = extractionParams;
     
-    return AlertDialog(
+    return Dialog(
       backgroundColor: G20Colors.surfaceDark,
-      title: Row(
-        children: [
-          Container(
-            width: 12, height: 12,
-            decoration: const BoxDecoration(color: G20Colors.warning, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Set Capture Duration',
-              style: TextStyle(fontSize: 14, color: G20Colors.textPrimaryDark),
-              overflow: TextOverflow.ellipsis,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header with frequency
+            Row(
+              children: [
+                Container(
+                  width: 10, height: 10,
+                  decoration: const BoxDecoration(color: G20Colors.warning, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${boxCenterFreqMHz.toStringAsFixed(1)} MHz',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: G20Colors.textPrimaryDark),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: G20Colors.textSecondaryDark, size: 20),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    ref.read(manualCaptureProvider.notifier).cancelDrawing();
+                  },
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Frequency info - FIXED: Use calculated box center freq instead of view CF
-          Text(
-            'Center Freq: ${boxCenterFreqMHz.toStringAsFixed(2)} MHz',
-            style: const TextStyle(fontSize: 12, color: G20Colors.textSecondaryDark),
-          ),
-          const SizedBox(height: 16),
-          
-          // Duration selector
-          const Text('How long to capture?', style: TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark)),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: _durations.map((d) => _DurationChip(
-              minutes: d,
-              isSelected: _durationMinutes == d,
-              onTap: () => setState(() => _durationMinutes = d),
-            )).toList(),
-          ),
-          
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: G20Colors.success.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: G20Colors.success.withOpacity(0.3)),
+            
+            const SizedBox(height: 20),
+            
+            // Duration selector - large touch-friendly buttons
+            const Text('DURATION', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: G20Colors.textSecondaryDark)),
+            const SizedBox(height: 10),
+            Row(
+              children: _durations.map((d) => Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: _MobileDurationButton(
+                    minutes: d,
+                    isSelected: _durationMinutes == d,
+                    onTap: () => setState(() => _durationMinutes = d),
+                  ),
+                ),
+              )).toList(),
             ),
-            child: Text(
-              captureState.isCapturing 
-                  ? 'This capture will be queued after the current one completes'
-                  : 'Capture will start immediately and save to Training tab',
-              style: const TextStyle(fontSize: 11, color: G20Colors.textSecondaryDark),
+            
+            const SizedBox(height: 24),
+            
+            // Band mode toggle - single large button that transforms
+            const Text('CAPTURE MODE', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: G20Colors.textSecondaryDark)),
+            const SizedBox(height: 10),
+            _BandModeToggle(
+              isNarrowband: _extractNarrowband,
+              onToggle: () => setState(() => _extractNarrowband = !_extractNarrowband),
+              narrowbandInfo: _extractNarrowband ? params : null,
             ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.pop(context);
-            // FIXED: Cancel drawing mode and clear pending box completely
-            ref.read(manualCaptureProvider.notifier).cancelDrawing();
-          },
-          child: const Text('Cancel', style: TextStyle(color: G20Colors.textSecondaryDark)),
+            
+            const SizedBox(height: 24),
+            
+            // Queue info
+            if (captureState.isCapturing)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: G20Colors.warning.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.queue, color: G20Colors.warning, size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Will queue after current capture',
+                        style: TextStyle(fontSize: 12, color: G20Colors.warning),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            
+            const SizedBox(height: 20),
+            
+            // Start button - large and prominent
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: () => _startCapture(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: G20Colors.success,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      captureState.isCapturing ? Icons.add_to_queue : Icons.fiber_manual_record,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      captureState.isCapturing ? 'QUEUE CAPTURE' : 'START CAPTURE',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        ElevatedButton(
-          onPressed: () => _startCapture(context),
-          style: ElevatedButton.styleFrom(backgroundColor: G20Colors.success),
-          child: Text(captureState.isCapturing ? 'Queue Capture' : 'Start Capture'),
-        ),
-      ],
+      ),
     );
   }
 
@@ -979,12 +1059,217 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
     Navigator.pop(context);
     
     final notifier = ref.read(manualCaptureProvider.notifier);
-    
-    // Update the pending duration with the selected value
     notifier.setPendingDuration(_durationMinutes);
     
-    // Now start the capture with the correct duration
+    if (_extractNarrowband) {
+      final params = extractionParams;
+      notifier.setExtractionParams(
+        centerOffsetHz: params['center_offset_hz']!,
+        bandwidthHz: params['bandwidth_hz']!,
+        extractSubband: true,
+      );
+    } else {
+      notifier.setExtractionParams(
+        centerOffsetHz: 0,
+        bandwidthHz: _sourceBandwidthHz,
+        extractSubband: false,
+      );
+    }
+    
     notifier.confirmAndStart();
+  }
+}
+
+/// Mobile-friendly duration button
+class _MobileDurationButton extends StatelessWidget {
+  final int minutes;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _MobileDurationButton({
+    required this.minutes,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 48,
+        decoration: BoxDecoration(
+          color: isSelected ? G20Colors.primary : G20Colors.cardDark,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? G20Colors.primary : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            '${minutes}m',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? Colors.white : G20Colors.textSecondaryDark,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Toggle button for Full Band / Narrowband mode
+class _BandModeToggle extends StatelessWidget {
+  final bool isNarrowband;
+  final VoidCallback onToggle;
+  final Map<String, double>? narrowbandInfo;
+
+  const _BandModeToggle({
+    required this.isNarrowband,
+    required this.onToggle,
+    this.narrowbandInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onToggle,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isNarrowband 
+              ? G20Colors.primary.withOpacity(0.15) 
+              : G20Colors.cardDark,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isNarrowband ? G20Colors.primary : G20Colors.textSecondaryDark.withOpacity(0.3),
+            width: 2,
+          ),
+        ),
+        child: Column(
+          children: [
+            // Toggle indicator row
+            Row(
+              children: [
+                // Left label - Full Band
+                Expanded(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 150),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: !isNarrowband ? FontWeight.bold : FontWeight.normal,
+                      color: !isNarrowband ? G20Colors.warning : G20Colors.textSecondaryDark,
+                    ),
+                    child: const Text('FULL BAND', textAlign: TextAlign.center),
+                  ),
+                ),
+                
+                // Toggle switch indicator
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 52,
+                  height: 28,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: isNarrowband ? G20Colors.primary : G20Colors.warning,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: AnimatedAlign(
+                    duration: const Duration(milliseconds: 200),
+                    alignment: isNarrowband ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+                
+                // Right label - Narrowband
+                Expanded(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 150),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isNarrowband ? FontWeight.bold : FontWeight.normal,
+                      color: isNarrowband ? G20Colors.primary : G20Colors.textSecondaryDark,
+                    ),
+                    child: const Text('NARROWBAND', textAlign: TextAlign.center),
+                  ),
+                ),
+              ],
+            ),
+            
+            // Info row (only shown when narrowband is selected)
+            AnimatedCrossFade(
+              firstChild: const SizedBox(height: 0),
+              secondChild: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: narrowbandInfo != null ? Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _InfoBadge(
+                      label: 'BW',
+                      value: '${(narrowbandInfo!['bandwidth_hz']! / 1e6).toStringAsFixed(1)}M',
+                    ),
+                    _InfoBadge(
+                      label: 'Rate',
+                      value: '${narrowbandInfo!['output_rate_mhz']!.toStringAsFixed(1)}M',
+                    ),
+                    _InfoBadge(
+                      label: 'Decim',
+                      value: '${narrowbandInfo!['decimation_ratio']!.toStringAsFixed(0)}:1',
+                    ),
+                  ],
+                ) : const SizedBox.shrink(),
+              ),
+              crossFadeState: isNarrowband ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 200),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small info badge for narrowband stats
+class _InfoBadge extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoBadge({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: G20Colors.primary,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            color: G20Colors.textSecondaryDark,
+          ),
+        ),
+      ],
+    );
   }
 }
 

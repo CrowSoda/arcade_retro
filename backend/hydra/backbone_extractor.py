@@ -22,6 +22,16 @@ from datetime import datetime
 import torch
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
+
+
+# Custom anchor generator matching training config (training/service.py)
+# 5 sizes × 4 aspect ratios = 20 anchors per location
+def create_anchor_generator():
+    return AnchorGenerator(
+        sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
+        aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5  # Same aspects for all 5 FPN levels
+    )
 
 
 def extract_backbone_and_head(
@@ -54,9 +64,15 @@ def extract_backbone_and_head(
     # Load full model state dict
     full_state = torch.load(full_model_path, map_location="cpu", weights_only=False)
     
-    # Create model to understand structure
+    # Create model to understand structure (must match training anchor config)
     backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
-    model = FasterRCNN(backbone, num_classes=2)
+    model = FasterRCNN(
+        backbone,
+        num_classes=2,
+        rpn_anchor_generator=create_anchor_generator(),
+        rpn_fg_iou_thresh=0.5,
+        rpn_bg_iou_thresh=0.3,
+    )
     
     # Separate backbone and head weights
     backbone_state = {}
@@ -192,16 +208,28 @@ def validate_extraction(
     
     print("\n=== Validating extraction ===")
     
-    # Load original model
+    # Load original model (must match training anchor config)
     backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
-    original_model = FasterRCNN(backbone, num_classes=2)
+    original_model = FasterRCNN(
+        backbone,
+        num_classes=2,
+        rpn_anchor_generator=create_anchor_generator(),
+        rpn_fg_iou_thresh=0.5,
+        rpn_bg_iou_thresh=0.3,
+    )
     original_state = torch.load(original_path, map_location="cpu", weights_only=False)
     original_model.load_state_dict(original_state)
     original_model.eval()
     
-    # Load backbone + head
+    # Load backbone + head (must match training anchor config)
     backbone2 = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
-    hydra_model = FasterRCNN(backbone2, num_classes=2)
+    hydra_model = FasterRCNN(
+        backbone2,
+        num_classes=2,
+        rpn_anchor_generator=create_anchor_generator(),
+        rpn_fg_iou_thresh=0.5,
+        rpn_bg_iou_thresh=0.3,
+    )
     
     # Load backbone (full state as base)
     backbone_state = torch.load(backbone_path, map_location="cpu", weights_only=False)
