@@ -1,110 +1,177 @@
-# G20 RF Detection Platform - Demo Client
+# G20 RF Detection Platform
 
-A Flutter desktop application for the G20 RF detection platform. This client displays real-time waterfall spectrograms, detection boxes, and provides controls for RF parameters and model training.
+Real-time RF signal detection and visualization using GPU-accelerated spectrograms and Faster R-CNN inference.
 
-## Features
+## Quick Start
 
-### Live Detection View
-- **Waterfall Display**: Real-time scrolling spectrogram with color-mapped power levels
-- **PSD Chart**: Power Spectral Density graph showing current spectrum
-- **Detection Overlays**: Color-coded bounding boxes for detected signals
-- **Detection Table**: List of all active detections with class, confidence, and timestamps
-- **Inputs Panel**: RF controls (frequency, gain, bandwidth) with preset buttons
-
-### Training View
-- **Spectrogram Review**: Full-width display for reviewing captured data
-- **File Selector**: Browse and select IQ capture files
-- **Data Warnings**: Alerts when insufficient training samples
-- **Training Controls**: Epochs, learning rate, batch size inputs
-- **Class Statistics**: Table showing sample counts per class
-
-### Settings
-- **Connection**: Host, gRPC port, UDP port configuration
-- **Display**: Waterfall history, dB range, colormap selection
-- **Model**: Active model info and selection
-- **About**: Version info and documentation links
-
-## Prerequisites
-
-1. **Flutter SDK** (3.24+)
-2. **Windows Developer Mode** enabled (required for Windows builds)
-   - Run: `start ms-settings:developers` and enable Developer Mode
-3. **Visual Studio 2022** with C++ desktop development workload (for Windows builds)
-
-## Getting Started
-
-### Install Dependencies
 ```bash
+# 1. Install Flutter dependencies
 flutter pub get
-```
 
-### Run in Development Mode
-```bash
+# 2. Install Python backend dependencies  
+cd backend && pip install -r requirements.txt
+
+# 3. Generate gRPC stubs
+cd backend && generate_stubs.bat
+
+# 4. Run
 flutter run -d windows
 ```
 
-### Build Release
-```bash
-flutter build windows --release
+The Flutter app auto-launches the Python backend on startup.
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  FLUTTER (Desktop UI)                                                │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐       │
+│  │ Waterfall View  │  │  PSD Chart      │  │ Detection Table │       │
+│  │ (RGBA pixels)   │  │  (dB values)    │  │ (row-synced)    │       │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘       │
+│           │                    │                    │                │
+│           └────────────────────┴────────────────────┘                │
+│                                │                                     │
+│                    ┌───────────▼───────────┐                         │
+│                    │  VideoStreamProvider  │                         │
+│                    │   (WebSocket client)  │                         │
+│                    └───────────┬───────────┘                         │
+└────────────────────────────────┼─────────────────────────────────────┘
+                                 │ WebSocket (row strips)
+┌────────────────────────────────┼─────────────────────────────────────┐
+│  PYTHON BACKEND                ▼                                     │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │                    server.py (WebSocket + gRPC)             │     │
+│  └──────────────────────────────┬──────────────────────────────┘     │
+│                                 │                                    │
+│  ┌──────────────────────────────▼──────────────────────────────┐     │
+│  │                  unified_pipeline.py                         │     │
+│  │  ┌────────────┐  ┌─────────────────┐  ┌──────────────────┐  │     │
+│  │  │ IQ Source  │→ │ GPU FFT (cuFFT) │→ │ Faster R-CNN     │  │     │
+│  │  │ (.sigmf)   │  │ (waterfall)     │  │ (TensorRT/PT)    │  │     │
+│  │  └────────────┘  └─────────────────┘  └──────────────────┘  │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-The built executable will be at:
-`build/windows/x64/runner/Release/g20_demo.exe`
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/ARCHITECTURE.md) | System design, data flow, and hard points |
+| [Backend](backend/README.md) | Python server setup and benchmarks |
+| [TENSORCADE Compat](g20_tensorcade_compat/README.md) | Model validation against TENSORCADE baseline |
+
+## Key Concepts
+
+### Dual FFT Processing
+
+The system runs **two separate FFT pipelines** with different parameters:
+
+| Pipeline | FFT Size | Dynamic Range | Purpose |
+|----------|----------|---------------|---------|
+| Inference | 4096 | 80 dB | Must match TENSORCADE model training |
+| Waterfall | 8K-64K | 60 dB | High-resolution display |
+
+The inference FFT parameters are locked to match the model. The waterfall FFT can be changed via Settings.
+
+### Row-Strip Streaming
+
+Instead of sending full video frames, the backend sends ~20 row strips per frame:
+
+1. Backend computes GPU FFT → RGBA pixels
+2. Sends strip (17-byte header + pixels + PSD dB values)
+3. Flutter shifts its pixel buffer up and pastes new strip at bottom
+4. Detection boxes positioned by absolute row index
+
+Bandwidth: ~9 MB/s at 30fps (2048×20 strips).
+
+### Waterfall Source Indicator
+
+The waterfall shows which RX stream is feeding the display:
+
+- **SCANNING** - RX1 hunting for signals
+- **RX1 REC** - RX1 detected and is recording
+- **RX2 REC** - RX2 collecting (handoff from RX1)
+- **MANUAL** - Manual collection active
 
 ## Project Structure
 
 ```
 g20_demo/
-├── lib/
-│   ├── main.dart                    # App entry point
-│   ├── app.dart                     # Root app widget
+├── lib/                          # Flutter app
 │   ├── core/
-│   │   └── config/
-│   │       ├── theme.dart           # Color palette & themes
-│   │       └── router.dart          # Navigation routes
+│   │   ├── services/
+│   │   │   └── backend_launcher.dart   # Auto-starts Python backend
+│   │   └── grpc/
+│   │       └── connection_manager.dart # gRPC client
 │   └── features/
-│       ├── shell/
-│       │   └── app_shell.dart       # Main layout with NavigationRail
 │       ├── live_detection/
-│       │   ├── live_detection_screen.dart
-│       │   ├── widgets/
-│       │   │   ├── waterfall_display.dart
-│       │   │   ├── psd_chart.dart
-│       │   │   ├── detection_table.dart
-│       │   │   └── inputs_panel.dart
-│       │   └── providers/
-│       │       ├── waterfall_provider.dart
-│       │       └── detection_provider.dart
-│       ├── training/
-│       │   └── training_screen.dart
+│       │   ├── providers/
+│       │   │   └── video_stream_provider.dart  # WebSocket client
+│       │   └── widgets/
+│       │       └── video_waterfall_display.dart
 │       └── settings/
-│           └── settings_screen.dart
-└── test/
-    └── widget_test.dart
+│
+├── backend/                      # Python backend
+│   ├── server.py                 # WebSocket + gRPC server
+│   ├── unified_pipeline.py       # FFT + inference pipeline
+│   ├── gpu_fft.py               # CUDA FFT processing
+│   └── inference.py             # TensorRT/PyTorch engine
+│
+├── protos/                       # gRPC protocol definitions
+│   ├── control.proto            # SDR hardware control
+│   └── inference.proto          # ML inference service
+│
+├── config/
+│   └── spectrogram.yaml         # Canonical FFT parameters
+│
+├── models/                       # Trained .pth models
+├── data/                         # IQ capture files (.sigmf)
+└── docs/                         # Additional documentation
 ```
 
-## Demo Mode
+## Configuration
 
-The app runs in demo mode by default, simulating:
-- Waterfall data with noise floor and signals
-- Detection boxes that appear, move, and disappear
-- System state indicators
+### Backend Connection
 
-## Connecting to Real Backend
+Flutter connects to backend via WebSocket for streaming data and gRPC for control commands:
 
-To connect to the G20 backend:
+- **WebSocket**: `ws://localhost:8765/ws/video` (row-strip streaming)
+- **gRPC**: `localhost:50051` (device control, inference control)
 
-1. Update connection settings in the Settings screen
-2. The app expects:
-   - **gRPC server** on port 50051 for control commands
-   - **UDP stream** on port 5000 for telemetry/waterfall data
+Port is auto-discovered - the Python server prints `WS_PORT:XXXX` on startup.
 
-## Next Steps
+### Spectrogram Parameters
 
-- [ ] Define proto files for gRPC communication
-- [ ] Implement real UDP telemetry client
-- [ ] Add mock server for development testing
-- [ ] Connect to actual G20 hardware
+Edit `config/spectrogram.yaml` for inference FFT settings:
+
+```yaml
+fft_size: 4096
+overlap: 0.5
+dynamic_range_db: 80.0  # Must match model training
+```
+
+Waterfall display FFT is controlled via Settings UI (8K to 64K).
+
+## Build
+
+```bash
+# Development
+flutter run -d windows
+
+# Release
+flutter build windows --release
+# Output: build/windows/x64/runner/Release/g20_demo.exe
+```
+
+## Requirements
+
+- Flutter SDK 3.24+
+- Python 3.8+
+- CUDA 11.8+ (for GPU FFT)
+- PyTorch with CUDA support
+- Windows: Visual Studio 2022 with C++ workload
 
 ## License
 

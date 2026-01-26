@@ -5,6 +5,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -308,37 +309,61 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
   Future<void> connect(String host, int port) async {
     if (state.isConnected || state.isConnecting) {
-      debugPrint('[VideoStream] Already connected or connecting');
       return;
     }
     
     state = state.copyWith(isConnecting: true, error: null);
     
-    try {
-      final url = 'ws://$host:$port/ws/video';
-      debugPrint('[VideoStream] Connecting to $url');
+    // Use runZonedGuarded to catch async errors that escape try-catch
+    await runZonedGuarded(() async {
+      try {
+        final url = 'ws://$host:$port/ws/video';
 
-      _channel = WebSocketChannel.connect(Uri.parse(url));
+        _channel = WebSocketChannel.connect(Uri.parse(url));
+        
+        // Wait for connection to establish (catches SocketException here)
+        await _channel!.ready;
 
-      _subscription = _channel!.stream.listen(
-        _onMessage,
-        onError: _onError,
-        onDone: _onDone,
-      );
+        _subscription = _channel!.stream.listen(
+          _onMessage,
+          onError: _onError,
+          onDone: _onDone,
+        );
 
-      // Reset first frame flag on connect
-      _firstFrameReceived = false;
+        // Reset first frame flag on connect
+        _firstFrameReceived = false;
 
-      state = state.copyWith(isConnected: true, isConnecting: false);
-      debugPrint('[VideoStream] Connected!');
-    } catch (e) {
-      debugPrint('[VideoStream] Connection error: $e');
+        state = state.copyWith(isConnected: true, isConnecting: false);
+      } on SocketException {
+        // Backend not ready yet - silently set error state
+        state = state.copyWith(
+          isConnected: false,
+          isConnecting: false,
+          error: 'Backend not ready',
+        );
+      } on WebSocketChannelException {
+        // WebSocket specific error
+        state = state.copyWith(
+          isConnected: false,
+          isConnecting: false,
+          error: 'WebSocket error',
+        );
+      } catch (e) {
+        // Other errors - also silent
+        state = state.copyWith(
+          isConnected: false,
+          isConnecting: false,
+          error: e.toString(),
+        );
+      }
+    }, (error, stack) {
+      // Silently handle any escaped errors
       state = state.copyWith(
         isConnected: false,
         isConnecting: false,
-        error: e.toString(),
+        error: 'Connection failed',
       );
-    }
+    });
   }
 
   void disconnect() {
@@ -450,18 +475,18 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       _initPixelBuffer(stripWidth, state.metadata?.suggestedBufferHeight ?? 5700);
     }
     
-    // Calculate FPS with rolling window
+
     final now = DateTime.now();
-    _fpsFrameCount++;
     if (_lastFrameTime != null) {
+      _fpsFrameCount++;
       final elapsed = now.difference(_lastFrameTime!).inMilliseconds;
       if (elapsed >= 1000) {
         _measuredFps = _fpsFrameCount * 1000.0 / elapsed;
         _fpsFrameCount = 0;
-        _lastFrameTime = now;  // Reset timer after measurement
+        _lastFrameTime = now;
       }
     } else {
-      _lastFrameTime = now;  // Initialize on first frame
+      _lastFrameTime = now;
     }
     
     // SCROLL: Move buffer up by rowsInStrip rows

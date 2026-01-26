@@ -115,6 +115,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               const SizedBox(height: 16),
               // Colormap selector - wired to provider and backend
               const _ColormapSelector(),
+              const SizedBox(height: 16),
+              // Stats overlay toggle
+              const _StatsOverlayToggle(),
             ],
           ),
           const SizedBox(height: 24),
@@ -1005,74 +1008,6 @@ class _FftSizeSelector extends ConsumerWidget {
             );
           }).toList(),
         ),
-        const SizedBox(height: 8),
-        // Info display showing resolution and timing
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: G20Colors.cardDark,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
-                  Text(
-                    'Resolution',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: G20Colors.textSecondaryDark,
-                    ),
-                  ),
-                  Text(
-                    option?.resolution ?? '${(20000000 / fftSize).round()} Hz/bin',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              Column(
-                children: [
-                  Text(
-                    'Est. Time',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: G20Colors.textSecondaryDark,
-                    ),
-                  ),
-                  Text(
-                    _estimatedTime(fftSize),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              Column(
-                children: [
-                  Text(
-                    'FFTs/frame',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: G20Colors.textSecondaryDark,
-                    ),
-                  ),
-                  Text(
-                    '${((660000 - fftSize) ~/ (fftSize ~/ 2) + 1)}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -1349,6 +1284,32 @@ class _ColormapSelector extends ConsumerWidget {
           }),
         ),
       ],
+    );
+  }
+}
+
+/// Stats overlay toggle - show/hide FPS, resolution, row count on waterfall
+class _StatsOverlayToggle extends ConsumerWidget {
+  const _StatsOverlayToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final showStats = ref.watch(showStatsOverlayProvider);
+    
+    return SwitchListTile(
+      title: const Text('Show Stats Overlay'),
+      subtitle: Text(
+        'Display FPS, resolution, and row count on waterfall',
+        style: TextStyle(
+          fontSize: 11,
+          color: G20Colors.textSecondaryDark,
+        ),
+      ),
+      value: showStats,
+      onChanged: (v) {
+        ref.read(showStatsOverlayProvider.notifier).state = v;
+      },
+      contentPadding: EdgeInsets.zero,
     );
   }
 }

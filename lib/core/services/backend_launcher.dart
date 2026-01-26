@@ -8,7 +8,6 @@
 
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import '../grpc/connection_manager.dart';
@@ -92,7 +91,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
     for (final path in possiblePaths) {
       final serverFile = File(p.join(path, 'server.py'));
       if (serverFile.existsSync()) {
-        debugPrint('📁 Found backend at: $path');
         return path;
       }
     }
@@ -109,9 +107,8 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
     try {
       final pidFile = File(_pidFilePath);
       await pidFile.writeAsString(pid.toString());
-      debugPrint('📝 Wrote PID file: $pid');
-    } catch (e) {
-      debugPrint('⚠️ Failed to write PID file: $e');
+    } catch (_) {
+      // Ignore write errors
     }
   }
 
@@ -121,10 +118,9 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       final pidFile = File(_pidFilePath);
       if (await pidFile.exists()) {
         await pidFile.delete();
-        debugPrint('🗑️ Deleted PID file');
       }
-    } catch (e) {
-      debugPrint('⚠️ Failed to delete PID file: $e');
+    } catch (_) {
+      // Ignore delete errors
     }
   }
 
@@ -141,41 +137,29 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
         await pidFile.delete();
         return;
       }
-
-      debugPrint('🔍 Found stale PID file with PID: $oldPid');
       
       // Check if process is still running and kill it
       if (Platform.isWindows) {
         // On Windows, use taskkill to kill the process tree
-        final result = await Process.run(
-          'taskkill',
-          ['/F', '/T', '/PID', oldPid.toString()],
-        );
-        if (result.exitCode == 0) {
-          debugPrint('🧹 Killed stale backend process (PID: $oldPid)');
-        } else {
-          debugPrint('ℹ️ Stale process already gone (PID: $oldPid)');
-        }
+        await Process.run('taskkill', ['/F', '/T', '/PID', oldPid.toString()]);
       } else {
         // On Unix, try SIGTERM then SIGKILL
         try {
           Process.killPid(oldPid, ProcessSignal.sigterm);
           await Future.delayed(const Duration(seconds: 2));
           Process.killPid(oldPid, ProcessSignal.sigkill);
-          debugPrint('🧹 Killed stale backend process (PID: $oldPid)');
-        } catch (e) {
-          debugPrint('ℹ️ Stale process already gone (PID: $oldPid)');
+        } catch (_) {
+          // Process already gone
         }
       }
 
       // Delete the stale PID file
       await pidFile.delete();
-      debugPrint('🗑️ Cleaned up stale PID file');
       
       // Wait a moment for ports to be released
       await Future.delayed(const Duration(milliseconds: 500));
-    } catch (e) {
-      debugPrint('⚠️ Error cleaning up stale PIDs: $e');
+    } catch (_) {
+      // Ignore cleanup errors
     }
   }
 
@@ -193,7 +177,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
     try {
       // Clean up any stale processes from previous runs first
-      debugPrint('🧹 Checking for stale backend processes...');
       await _cleanupStalePids();
       
       // Find Python executable
@@ -201,9 +184,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       if (pythonExe == null) {
         throw Exception('Python not found. Install Python 3.8+');
       }
-
-      debugPrint('🐍 Found Python: $pythonExe');
-      debugPrint('📁 Backend path: $_backendPath');
 
       // Build command - run server.py with both gRPC and WebSocket
       // Use --ws-port 0 for auto-discovery (OS picks free port, server prints it)
@@ -218,23 +198,20 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       );
 
       final pid = _process!.pid;
-      debugPrint('🚀 Backend started with PID: $pid');
       
       // Write PID file for tracking (used to cleanup stale processes on restart)
       await _writePidFile(pid);
 
-      // Capture stdout
+      // Capture stdout - SILENTLY (no debugPrint)
       _stdoutSub = _process!.stdout
           .transform(const SystemEncoding().decoder)
           .listen((data) {
         _addLog('[OUT] $data');
-        debugPrint('🐍 $data');
         
         // Parse WS_PORT from server stdout (KISS auto-discovery)
         final wsPortMatch = RegExp(r'WS_PORT:(\d+)').firstMatch(data);
         if (wsPortMatch != null) {
           final discoveredPort = int.parse(wsPortMatch.group(1)!);
-          debugPrint('🎯 Discovered WebSocket port: $discoveredPort');
           state = state.copyWith(wsPort: discoveredPort);
         }
         
@@ -247,7 +224,7 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
         }
       });
 
-      // Capture stderr
+      // Capture stderr - SILENTLY
       _stderrSub = _process!.stderr
           .transform(const SystemEncoding().decoder)
           .listen((data) {
@@ -257,7 +234,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       // Handle process exit
       _process!.exitCode.then((code) {
         if (!_disposed) {
-          debugPrint('⚠️ Backend exited with code: $code');
           state = state.copyWith(
             state: BackendState.stopped,
             errorMessage: code != 0 ? 'Backend exited with code $code' : null,
@@ -279,7 +255,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
       return true;
     } catch (e) {
-      debugPrint('❌ Failed to start backend: $e');
       state = state.copyWith(
         state: BackendState.error,
         errorMessage: e.toString(),
@@ -295,12 +270,10 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
     if (_process != null) {
       final pid = _process!.pid;
-      debugPrint('🛑 Stopping backend (PID: $pid)');
       
       if (Platform.isWindows) {
         // Use taskkill /F /T to kill entire process tree (includes FFmpeg subprocesses)
-        final result = await Process.run('taskkill', ['/F', '/T', '/PID', pid.toString()]);
-        debugPrint('🛑 taskkill result: exit=${result.exitCode}');
+        await Process.run('taskkill', ['/F', '/T', '/PID', pid.toString()]);
       } else {
         _process!.kill(ProcessSignal.sigterm);
         try {
@@ -320,8 +293,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       state: BackendState.stopped,
       pid: null,
     );
-    
-    debugPrint('✅ Backend stopped successfully');
   }
 
   /// Restart the backend

@@ -789,66 +789,92 @@ class _DbRangeSliders extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final dynamicRange = ref.watch(waterfallDynamicRangeProvider);
     
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header with current value
-        Row(
-          children: [
-            const Icon(Icons.tune, size: 12, color: G20Colors.textSecondaryDark),
-            const SizedBox(width: 4),
-            const Text(
-              'Dynamic Range',
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: G20Colors.textPrimaryDark),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: G20Colors.primary.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(4),
+    // Use LayoutBuilder to handle small heights gracefully
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // If too small, show compact version
+        if (constraints.maxHeight < 60) {
+          return Row(
+            children: [
+              const Icon(Icons.tune, size: 12, color: G20Colors.textSecondaryDark),
+              const SizedBox(width: 4),
+              Text('${dynamicRange.toStringAsFixed(0)} dB', 
+                style: const TextStyle(fontSize: 10, color: G20Colors.primary)),
+              Expanded(
+                child: Slider(
+                  value: dynamicRange.clamp(30, 100),
+                  min: 30, max: 100,
+                  onChanged: (v) => _setDynamicRange(ref, v),
+                ),
               ),
-              child: Text(
-                '${dynamicRange.toStringAsFixed(0)} dB',
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: G20Colors.primary),
+            ],
+          );
+        }
+        
+        // Full version
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header with current value
+            Row(
+              children: [
+                const Icon(Icons.tune, size: 12, color: G20Colors.textSecondaryDark),
+                const SizedBox(width: 4),
+                const Text(
+                  'Dynamic Range',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: G20Colors.textPrimaryDark),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: G20Colors.primary.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${dynamicRange.toStringAsFixed(0)} dB',
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: G20Colors.primary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            
+            // Simple slider
+            SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                activeTrackColor: G20Colors.primary,
+                inactiveTrackColor: G20Colors.cardDark,
+                thumbColor: G20Colors.primary,
+                overlayColor: G20Colors.primary.withValues(alpha: 0.2),
+              ),
+              child: Slider(
+                value: dynamicRange.clamp(30, 100),
+                min: 30,
+                max: 100,
+                divisions: 14,  // 5 dB steps
+                onChanged: (v) => _setDynamicRange(ref, v),
+              ),
+            ),
+            
+            // Min/Max labels
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('High', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
+                  Text('Low', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
+                ],
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 4),
-        
-        // Simple slider
-        SliderTheme(
-          data: SliderThemeData(
-            trackHeight: 4,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            activeTrackColor: G20Colors.primary,
-            inactiveTrackColor: G20Colors.cardDark,
-            thumbColor: G20Colors.primary,
-            overlayColor: G20Colors.primary.withValues(alpha: 0.2),
-          ),
-          child: Slider(
-            value: dynamicRange.clamp(30, 100),
-            min: 30,
-            max: 100,
-            divisions: 14,  // 5 dB steps
-            onChanged: (v) => _setDynamicRange(ref, v),
-          ),
-        ),
-        
-        // Min/Max labels
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('High', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
-              Text('Low', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
-            ],
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 }

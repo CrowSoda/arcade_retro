@@ -13,7 +13,7 @@ import '../../../core/services/backend_launcher.dart';
 import '../providers/video_stream_provider.dart';
 import '../providers/map_provider.dart' show getSOIColor, soiVisibilityProvider;
 import '../providers/sdr_config_provider.dart';
-import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider, waterfallFpsProvider;
+import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider, waterfallFpsProvider, showStatsOverlayProvider;
 
 /// Waterfall display using row-strip streaming
 class VideoWaterfallDisplay extends ConsumerStatefulWidget {
@@ -51,7 +51,6 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     _hasAttemptedConnect = true;
     
     final notifier = ref.read(videoStreamProvider.notifier);
-    debugPrint('[VideoWaterfallDisplay] Auto-connecting to ws://${widget.host}:$port/ws/video');
     notifier.connect(widget.host, port);
   }
 
@@ -80,7 +79,6 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     // Listen for time span changes and send to backend
     ref.listen<double>(waterfallTimeSpanProvider, (previous, next) {
       final currentState = ref.read(videoStreamProvider);
-      debugPrint('[Waterfall] Time span listener fired: $previous → $next, connected: ${currentState.isConnected}');
       if (previous != next && currentState.isConnected) {
         ref.read(videoStreamProvider.notifier).setTimeSpan(next);
       }
@@ -89,7 +87,6 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     // Listen for FPS changes and send to backend
     ref.listen<int>(waterfallFpsProvider, (previous, next) {
       final currentState = ref.read(videoStreamProvider);
-      debugPrint('[Waterfall] FPS listener fired: $previous → $next, connected: ${currentState.isConnected}');
       if (previous != next && currentState.isConnected) {
         ref.read(videoStreamProvider.notifier).setFps(next);
       }
@@ -196,12 +193,13 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
               // Connection status overlay
               if (!streamState.isConnected) _buildConnectionOverlay(streamState),
               
-              // Stats overlay (top-right corner)
-              Positioned(
-                top: topMargin + 4,
-                right: rightMargin + 4,
-                child: _buildStatsOverlay(streamState),
-              ),
+              // Stats overlay (top-right corner) - controlled by settings toggle
+              if (ref.watch(showStatsOverlayProvider))
+                Positioned(
+                  top: topMargin + 4,
+                  right: rightMargin + 4,
+                  child: _buildStatsOverlay(streamState),
+                ),
             ],
           ),
         );
@@ -235,16 +233,9 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     if (state.frameCount != _lastFrameCount) {
       _lastFrameCount = state.frameCount;
       
-      // PERF TIMING: Measure image decode time
-      final stopwatch = Stopwatch()..start();
-      
       // DOUBLE-BUFFER: Create image async, don't block
       _createImageFromPixels(pixelBuffer, state.bufferWidth, state.bufferHeight)
           .then((newImage) {
-        stopwatch.stop();
-        // Print every frame to see decode latency
-        debugPrint('[PERF] Image decode: ${stopwatch.elapsedMilliseconds}ms (${state.bufferWidth}×${state.bufferHeight})');
-        
         if (newImage != null && mounted) {
           setState(() {
             // Dispose the OLD previous image (not the current one!)
@@ -553,7 +544,7 @@ class _VideoTimeAxis extends ConsumerWidget {
         return '-${seconds.toStringAsFixed(0)}s';
       } else {
         return '-${(seconds * 1000).toStringAsFixed(0)}ms';
-      }
+       }
     }
 
     return Container(

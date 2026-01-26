@@ -1,285 +1,189 @@
-# G20 System Architecture
-
-**Last Updated:** January 25, 2026
-
----
+# G20 Architecture
 
 ## Overview
 
-G20 is a real-time RF signal detection system with a Flutter frontend and Python GPU-accelerated backend. The system processes IQ (In-phase/Quadrature) data through FFT to generate waterfalls, runs ML inference for signal detection, and streams results to the UI.
+G20 is a real-time RF signal detection system with a Flutter desktop UI and Python GPU backend. The system processes IQ data through GPU-accelerated FFT pipelines, runs Faster R-CNN object detection, and streams waterfall displays to the UI.
 
----
+## Hard Points
 
-## System Components
+### 1. Dual FFT Configuration (Inference vs Display)
 
+The system maintains **two completely separate FFT pipelines**:
+
+**Inference FFT** (fixed, locked to model training):
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          G20 SYSTEM                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  ┌───────────────┐    WebSocket     ┌─────────────────────────────┐  │
-│  │               │    (8765)        │                             │  │
-│  │   Flutter     │◄────────────────►│   Python Backend            │  │
-│  │   Frontend    │                  │                             │  │
-│  │               │    gRPC          │   • unified_pipeline.py     │  │
-│  │               │◄────────────────►│   • gpu_fft.py              │  │
-│  │               │    (50051)       │   • inference.py            │  │
-│  │               │                  │   • server.py               │  │
-│  └───────────────┘                  └─────────────────────────────┘  │
-│                                                                       │
-└─────────────────────────────────────────────────────────────────────┘
+FFT Size: 4096
+Hop Length: 2048 (50% overlap)
+Dynamic Range: 80 dB
+Output: 1024×1024 spectrogram → Faster R-CNN
 ```
 
----
+**Waterfall FFT** (user-configurable):
+```
+FFT Size: 8192 - 65536 (selectable)
+Hop Length: FFT_SIZE / 2
+Dynamic Range: 60 dB
+Output: 2048-wide RGBA strips → display
+```
+
+If you change inference FFT parameters, the model outputs garbage. The model was trained on 80dB dynamic range spectrograms - feeding it 60dB data produces wrong detections.
+
+### 2. Row-Strip Protocol
+
+The waterfall uses row-strip streaming instead of video encoding:
+
+```
+Message format: [TYPE:1][HEADER:17][PIXELS][PSD]
+
+Header (17 bytes):
+├─ frame_id:     uint32 (4 bytes)
+├─ total_rows:   uint32 (4 bytes)  ← monotonic counter
+├─ rows_in_strip: uint16 (2 bytes) ← ~20 rows/frame
+├─ strip_width:  uint16 (2 bytes)  ← 2048
+├─ pts:          float32 (4 bytes)
+└─ source_id:    uint8 (1 byte)    ← waterfall source
+
+Pixel data:
+└─ RGBA bytes: rows_in_strip × strip_width × 4
+
+PSD data:
+└─ Float32 dB values: strip_width × 4 bytes
+```
+
+Flutter maintains a local pixel buffer and shifts it upward on each strip, pasting new rows at the bottom. Detection boxes use `base_row + row_offset` for positioning.
+
+### 3. Detection Box Synchronization
+
+Inference runs on **6 accumulated frames** (not single frames). Detection coordinates are normalized 0-1 relative to the inference window:
+
+```python
+# Backend computes row offset from model x-coordinates
+total_inference_rows = rows_per_frame * inference_chunk_count  # ~228 rows
+row_offset = int(detection.x1 * total_inference_rows)
+row_span = int((detection.x2 - detection.x1) * total_inference_rows)
+```
+
+Flutter converts to display coordinates:
+```dart
+// row_offset relative to base_row (when inference started)
+display_y = buffer_height - (total_rows_received - (base_row + row_offset))
+```
+
+### 4. Backend Lifecycle Management
+
+The Flutter app auto-launches the Python backend:
+
+1. **Startup**: `BackendLauncher` spawns `python server.py --ws-port 0`
+2. **Discovery**: Server prints `WS_PORT:XXXX`, Flutter parses stdout
+3. **Watchdog**: Python monitors parent PID, exits if Flutter dies
+4. **Shutdown**: Flutter sends taskkill, Python cleans up resources
+
+PID file (`backend/.backend.pid`) tracks stale processes for cleanup.
+
+### 5. GPU FFT Processing
+
+`gpu_fft.py` uses cuFFT via PyTorch for waterfall FFT:
+
+```python
+# Batched FFT on GPU (5-10x faster than CPU)
+fft_result = torch.fft.rfft(windowed_segments, dim=1)
+magnitudes = torch.abs(fft_result)
+db = 20 * torch.log10(magnitudes + 1e-10)
+
+# Decimate to fixed 20 rows per frame (regardless of FFT size)
+decimated = db.reshape(TARGET_ROWS, pool_size, fft_size).max(axis=1)
+```
+
+This decouples FFT resolution from display bandwidth - larger FFT gives finer frequency resolution but same frame rate.
+
+### 6. Model Loading
+
+Faster R-CNN with ResNet18 backbone:
+
+```python
+backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=5)
+model = FasterRCNN(backbone, num_classes=2)
+state = torch.load(model_path, map_location=device, weights_only=False)
+model.load_state_dict(state)
+model.half()  # FP16 for speed
+```
+
+Backend auto-detects TensorRT (.trt), ONNX (.onnx), or PyTorch (.pth) models. TensorRT gives best performance on Jetson.
 
 ## Data Flow
 
-### 1. IQ Processing Pipeline
-
 ```
-IQ File (.iq, .bin)
-       │
-       ▼
-┌──────────────────────┐
-│  GPU FFT Processor   │  gpu_fft.py - GPUSpectrogramProcessor
-│  • cuFFT kernels     │  • 8K/16K/32K/64K point FFT
-│  • Welch averaging   │  • Overlap-add processing
-│  • dB normalization  │  • Auto noise floor tracking
-└──────────────────────┘
-       │
-       ▼
-┌──────────────────────┐
-│  Colormap LUT        │  viridis/plasma/inferno/magma/turbo
-│  • dB → RGB          │  256-entry lookup tables
-└──────────────────────┘
-       │
-       ▼
-┌──────────────────────┐
-│  Row Strip Encoder   │  RGBA rows (2048px × ~38 rows per frame)
-│  • Binary header     │  frame_id, total_rows, pts, source_id
-│  • RGBA pixels       │  
-│  • PSD float32       │  Power spectral density per bin
-└──────────────────────┘
-       │
-       ▼  WebSocket (0x01 STRIP message)
-┌──────────────────────┐
-│  Flutter Client      │  video_stream_provider.dart
-│  • Pixel buffer      │  Scroll + paste new rows
-│  • RawImage render   │  Direct RGBA → texture
-│  • PSD chart         │  Latest row dB values
-└──────────────────────┘
+IQ File (.sigmf-data)
+    │
+    ├─► Waterfall Pipeline (GPU FFT)
+    │   └─► Colormap → RGBA strips → WebSocket → Flutter display
+    │
+    └─► Inference Pipeline (every 6 frames)
+        ├─► Spectrogram (4096 FFT, 80dB) → 1024×1024
+        ├─► Faster R-CNN → bounding boxes
+        └─► JSON detections → WebSocket → Flutter overlay
 ```
 
-### 2. Detection Pipeline
+## Communication Channels
 
-```
-FFT Spectrogram
-       │
-       ▼
-┌──────────────────────┐
-│  TensorRT Inference  │  inference.py
-│  • YOLOv8 model      │  • Signal classification
-│  • FP16 optimized    │  • Bounding box detection
-│  • Batch processing  │  • Confidence scores
-└──────────────────────┘
-       │
-       ▼  WebSocket (0x02 DETECTION message)
-┌──────────────────────┐
-│  Detection Overlay   │  detection_provider.dart
-│  • Row-based coords  │  absoluteRow + rowSpan
-│  • Lifecycle mgmt    │  Prune when scrolled off
-│  • Table display     │  detection_table.dart
-└──────────────────────┘
-```
+| Channel | Protocol | Purpose |
+|---------|----------|---------|
+| WebSocket `/ws/video` | Binary + JSON | Row strips, detections, metadata |
+| gRPC :50051 | Protobuf | Device control, inference control |
 
----
+WebSocket handles the high-bandwidth streaming. gRPC handles control commands that need request/response semantics.
 
-## Communication Protocols
+## WebSocket Commands
 
-### WebSocket Protocol (Port 8765)
+Commands sent from Flutter to backend:
 
-Binary message format with 1-byte type prefix:
-
-| Type | Value | Description |
-|------|-------|-------------|
-| STRIP | 0x01 | RGBA row strip with header |
-| DETECTION | 0x02 | Detection JSON payload |
-| METADATA | 0x03 | Stream configuration |
-
-#### Strip Message Header (17 bytes)
-```
-Offset  Size  Type     Description
-0       4     uint32   frame_id
-4       4     uint32   total_rows (monotonic counter)
-8       2     uint16   rows_in_strip (typically 38)
-10      2     uint16   strip_width (typically 2048)
-12      4     float32  pts (presentation timestamp)
-16      1     uint8    source_id (0=SCAN, 1=RX1_REC, 2=RX2_REC, 3=MANUAL)
-17+     N×4   RGBA     pixel data (rows_in_strip × strip_width × 4)
-17+N    W×4   float32  PSD dB values (strip_width floats)
-```
-
-#### Commands (JSON via WebSocket)
 ```json
+{"command": "set_time_span", "seconds": 5.0}
 {"command": "set_fps", "fps": 30}
-{"command": "set_fft_size", "size": 65536}
+{"command": "set_fft_size", "size": 32768}
 {"command": "set_colormap", "colormap": 0}
+{"command": "set_score_threshold", "threshold": 0.5}
 {"command": "set_db_range", "min_db": -100, "max_db": -20}
-{"command": "set_time_span", "seconds": 2.5}
-{"command": "set_score_threshold", "threshold": 0.9}
+{"command": "stop"}
 ```
 
-### gRPC Protocol (Port 50051)
+## File Formats
 
-Used for device control commands (tuning, capture control):
+### IQ Data (.sigmf-data)
 
-- `DeviceControlService` - SDR tuning, bandwidth, gain
-- `InferenceService` - Model loading, inference control
-
----
-
-## State Management (Flutter)
-
-### Riverpod Architecture
-
+Raw complex64 samples (interleaved float32 I/Q):
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    PROVIDER HIERARCHY                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Settings Providers (settings_providers.dart)                    │
-│  ├── waterfallFpsProvider          StateProvider<int>            │
-│  ├── waterfallFftSizeProvider      StateProvider<int>            │
-│  ├── waterfallColormapProvider     StateProvider<int>            │
-│  ├── scoreThresholdProvider        StateProvider<double>         │
-│  └── ...                                                         │
-│                                                                  │
-│  Stream Providers (video_stream_provider.dart)                   │
-│  ├── videoStreamProvider           StateNotifierProvider         │
-│  │   ├── pixelBuffer: Uint8List    (2048 × 2850 × 4 bytes)      │
-│  │   ├── detections: List          (current visible)             │
-│  │   ├── totalRowsReceived: int    (monotonic counter)          │
-│  │   └── waterfallSource: enum     (SCAN/RX1_REC/RX2_REC)       │
-│  │                                                               │
-│  Detection Providers (detection_provider.dart)                   │
-│  ├── detectionProvider             StateNotifierProvider         │
-│  │   └── List<Detection>           (all active detections)      │
-│  │                                                               │
-│  UI State Providers (various)                                    │
-│  ├── rightPanelCollapsedProvider   StateProvider<bool>          │
-│  ├── displayModeProvider           derived from mapStateProvider│
-│  └── activeMissionProvider         StateProvider<Mission?>       │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+[I0][Q0][I1][Q1][I2][Q2]...
+└─ 8 bytes per sample (2 × float32)
 ```
 
----
+Metadata in `.sigmf-meta` JSON file.
 
-## Directory Structure
+### Model Files (.pth)
 
-### Flutter Frontend
-```
-lib/
-├── main.dart                 # Entry point
-├── app.dart                  # MaterialApp configuration
-├── core/
-│   ├── config/
-│   │   └── theme.dart        # G20Colors, dark theme
-│   ├── services/
-│   │   └── backend_launcher.dart  # Auto-start backend
-│   └── widgets/
-│       └── dialogs.dart      # Shared toasts, dialogs
-├── features/
-│   ├── shell/
-│   │   └── app_shell.dart    # Navigation rail, status bar
-│   ├── live_detection/
-│   │   ├── live_detection_screen.dart
-│   │   ├── providers/
-│   │   │   ├── video_stream_provider.dart
-│   │   │   ├── detection_provider.dart
-│   │   │   ├── waterfall_provider.dart
-│   │   │   └── ...
-│   │   └── widgets/
-│   │       ├── video_waterfall_display.dart
-│   │       ├── psd_chart.dart
-│   │       ├── detection_table.dart
-│   │       └── inputs_panel.dart
-│   ├── config/
-│   │   ├── config_screen.dart    # Mission editor
-│   │   ├── providers/
-│   │   └── widgets/
-│   │       └── mission_picker_dialog.dart
-│   └── settings/
-│       ├── settings_screen.dart
-│       └── providers/
-│           └── settings_providers.dart
-```
+PyTorch state dict with:
+- ResNet18 backbone weights
+- FPN neck weights  
+- RPN (region proposal network) weights
+- Detection head weights
 
-### Python Backend
-```
-backend/
-├── server.py                 # Entry point, WebSocket + gRPC
-├── unified_pipeline.py       # Main waterfall processing
-├── gpu_fft.py               # GPUSpectrogramProcessor (cuFFT)
-├── inference.py             # TensorRT YOLOv8 inference
-├── waterfall_buffer.py      # Row buffer management
-└── requirements.txt
-```
+2 classes: background (0), signal (1).
 
----
+## Performance Targets
 
-## Key Design Decisions
+| Metric | Target | Notes |
+|--------|--------|-------|
+| Frame rate | 30 fps | Waterfall + PSD update |
+| Inference latency | <10ms | Per 6-frame batch |
+| GPU FFT | <5ms | Per frame, any FFT size |
+| End-to-end latency | <60ms | IQ sample to display |
 
-### 1. Row-Strip Streaming
-Instead of full-frame video, we stream narrow horizontal strips (38 rows). This:
-- Reduces latency (~33ms per strip at 30fps)
-- Enables smoother scrolling
-- Allows row-indexed detection positioning
+## Troubleshooting
 
-### 2. Client-Side Pixel Buffer
-The Flutter client maintains its own RGBA pixel buffer and scrolls/pastes strips. This:
-- Eliminates server-side buffer state
-- Reduces bandwidth (no repeated pixels)
-- Enables arbitrary buffer height
+**Detections don't match signals**: Check dynamic range. Model trained on 80dB, waterfall shows 60dB.
 
-### 3. Absolute Row Indexing
-Detections are positioned by `absoluteRow` (monotonic counter) rather than pixel Y. This:
-- Survives buffer scrolling
-- Enables efficient pruning
-- Decouples detection timing from display
+**Boxes offset vertically**: Row sync issue. Check `base_row` and `row_offset` in detection JSON.
 
-### 4. Dual Protocol (WebSocket + gRPC)
-- **WebSocket** for high-bandwidth streaming (waterfall, detections)
-- **gRPC** for low-latency control commands (tuning, model switching)
+**Backend won't start**: Check `backend/.backend.pid` for stale process. Kill and delete file.
 
----
-
-## Performance Considerations
-
-### GPU FFT
-- cuFFT kernel warmup: 100-500ms on first call per size
-- FFT sizes: 8K (~2ms), 16K (~4ms), 32K (~6ms), 64K (~10ms)
-- Batch processing of 660K samples per frame
-
-### Pixel Buffer
-- Buffer size: 2048 × 2850 × 4 = ~23 MB
-- Scroll operation: memmove ~1ms per strip
-- RawImage → texture: ~1ms
-
-### Target Performance
-- 30 FPS sustained waterfall
-- <100ms detection latency
-- <50 MB client memory
-
----
-
-## Future Improvements
-
-1. **WebGPU Rendering** - Move pixel buffer to GPU for zero-copy
-2. **JPEG Compression** - Option for low-bandwidth mode
-3. **Multi-RX Fusion** - Combine RX1/RX2 in single view
-4. **Recording Playback** - Scrub through captured IQ files
-
----
-
-*Architecture document for G20 RF Detection System*
+**No GPU FFT**: Verify CUDA available with `python -c "import torch; print(torch.cuda.is_available())"`.

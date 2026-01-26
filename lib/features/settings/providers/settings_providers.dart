@@ -32,6 +32,10 @@ final scoreThresholdProvider = StateProvider<double>((ref) => 0.9);
 /// Skip first waterfall frame on connection (avoids garbage/initialization data)
 final skipFirstWaterfallFrameProvider = StateProvider<bool>((ref) => false);
 
+/// Show stats overlay on waterfall (FPS, resolution, row count)
+/// Default false - clean display for demos/production
+final showStatsOverlayProvider = StateProvider<bool>((ref) => false);
+
 /// Waterfall min dB setting - noise floor display
 final waterfallMinDbProvider = StateProvider<double>((ref) => -100.0);
 
