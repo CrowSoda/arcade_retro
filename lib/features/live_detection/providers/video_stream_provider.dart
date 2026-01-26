@@ -764,6 +764,78 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     }
   }
 
+  // =========================================================================
+  // HEAD MANAGEMENT - Dynamic signal detector loading for Hydra architecture
+  // =========================================================================
+  
+  /// Load detection heads for specified signals
+  /// Call this when starting a mission to enable detection
+  /// Returns loaded head names via callback (heads_loaded message)
+  void loadHeads(List<String> signalNames) {
+    debugPrint('[VideoStream] loadHeads: $signalNames');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot load heads - not connected');
+      return;
+    }
+    
+    if (signalNames.isEmpty) {
+      debugPrint('[VideoStream] No signals to load');
+      return;
+    }
+    
+    final msg = json.encode({
+      'command': 'load_heads',
+      'signal_names': signalNames,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent load_heads: $signalNames');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
+  }
+  
+  /// Unload detection heads to free GPU memory
+  /// Pass specific names or null to unload ALL heads
+  void unloadHeads([List<String>? signalNames]) {
+    debugPrint('[VideoStream] unloadHeads: ${signalNames ?? 'ALL'}');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot unload heads - not connected');
+      return;
+    }
+    
+    final msg = json.encode({
+      'command': 'unload_heads',
+      if (signalNames != null) 'signal_names': signalNames,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent unload_heads');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
+  }
+  
+  /// Query currently loaded heads
+  void getLoadedHeads() {
+    if (_channel == null) return;
+    
+    final msg = json.encode({'command': 'get_loaded_heads'});
+    _channel!.sink.add(msg);
+  }
+  
+  /// Query all available trained signals
+  void getAvailableSignals() {
+    if (_channel == null) return;
+    
+    final msg = json.encode({'command': 'get_available_signals'});
+    _channel!.sink.add(msg);
+  }
+
   @override
   void dispose() {
     disconnect();

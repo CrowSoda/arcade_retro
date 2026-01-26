@@ -36,8 +36,10 @@ import torch.nn.functional as F
 # Handle both module import (from server.py) and direct execution
 try:
     from .gpu_fft import GPUSpectrogramProcessor, VALID_FFT_SIZES, DEFAULT_FFT_SIZE
+    from .hydra.detector import HydraDetector
 except ImportError:
     from gpu_fft import GPUSpectrogramProcessor, VALID_FFT_SIZES, DEFAULT_FFT_SIZE
+    from hydra.detector import HydraDetector
 
 def _cleanup():
     print("[Cleanup] Shutting down...", flush=True)
@@ -310,7 +312,7 @@ COLORMAP_NAMES = ['viridis', 'plasma', 'inferno', 'magma', 'turbo']
 # =============================================================================
 DEBUG_DIR = Path('/tmp/fft_debug') if sys.platform != 'win32' else BASE_DIR / 'fft_debug'
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-DEBUG_ENABLED = False  # Set to True to save PNG captures
+DEBUG_ENABLED = False  # Set to True to save PNG captures to fft_debug/
 
 def capture_detection(fft_magnitude: np.ndarray, detection_boxes: list, chunk_index: int, label: str = ""):
     """
@@ -335,25 +337,26 @@ def capture_detection(fft_magnitude: np.ndarray, detection_boxes: list, chunk_in
         # Big figure for high resolution
         fig, ax = plt.subplots(figsize=(20, 10))
         
-        # Plot spectrogram (transpose so freq is Y axis)
-        im = ax.imshow(fft_magnitude.T, aspect='auto', origin='lower', cmap='viridis')
+        # Plot spectrogram - NO transpose, display as [height=freq, width=time]
+        # Origin='lower' puts freq=0 at bottom
+        im = ax.imshow(fft_magnitude, aspect='auto', origin='lower', cmap='viridis')
         plt.colorbar(im, ax=ax, label='Magnitude (dB)')
         
-        time_bins, freq_bins = fft_magnitude.shape
+        # Shape is [height, width] = [freq_bins, time_bins]
+        freq_bins, time_bins = fft_magnitude.shape
         
         # Draw detection boxes
+        # Box coords from detector.py are now correct: x=time, y=freq
         for det in detection_boxes:
-            # Convert normalized coords (0-1) to pixel coords
-            # NOTE: In model output, x1/x2 = time axis, y1/y2 = freq axis
             time_start = det['x1'] * time_bins
             time_end = det['x2'] * time_bins
             freq_start = det['y1'] * freq_bins
             freq_end = det['y2'] * freq_bins
             
             rect = patches.Rectangle(
-                (time_start, freq_start),
-                time_end - time_start,
-                freq_end - freq_start,
+                (time_start, freq_start),  # (x, y) = (time, freq)
+                time_end - time_start,     # width = time span
+                freq_end - freq_start,     # height = freq span
                 fill=False, 
                 edgecolor='red', 
                 linewidth=2
@@ -504,23 +507,40 @@ class TripleBufferedPipeline:
         logger.info(f"  WATERFALL: FFT={self.waterfall_fft_size}, hop={self.waterfall_hop}, dyn={self.waterfall_dynamic_range}dB")
     
     def _load_model(self, model_path: str):
-        import torchvision
-        from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+        """Load HydraDetector with shared backbone (NO heads loaded yet).
         
-        logger.info(f"Loading: {model_path}")
+        Heads are loaded dynamically when mission is started via WebSocket command.
+        This allows the app to start without any detection until mission is loaded.
+        """
+        logger.info(f"Loading HydraDetector backbone only (no heads yet)")
         
-        backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=5)
-        self.model = torchvision.models.detection.FasterRCNN(backbone, num_classes=self.num_classes)
+        self.detector = HydraDetector(str(MODELS_DIR), device=str(self.device))
+        self.detector.load_backbone()
         
-        state = torch.load(model_path, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(state)
-        self.model.to(self.device)
-        self.model.eval()
-        
-        if self.device.type == 'cuda':
-            self.model.half()
-        
-        logger.info(f"Model loaded on {self.device}")
+        # NO HEADS LOADED - will be loaded via load_heads command
+        logger.info(f"Hydra backbone loaded - waiting for load_heads command")
+    
+    def load_heads(self, signal_names: List[str]) -> List[str]:
+        """Load detection heads for specified signals. Returns list of loaded heads."""
+        self.detector.load_heads(signal_names)
+        loaded = self.detector.get_loaded_heads()
+        logger.info(f"Heads loaded: {loaded}")
+        return loaded
+    
+    def unload_heads(self, signal_names: List[str] = None) -> List[str]:
+        """Unload detection heads. Returns remaining loaded heads."""
+        self.detector.unload_heads(signal_names)
+        remaining = self.detector.get_loaded_heads()
+        logger.info(f"Heads after unload: {remaining}")
+        return remaining
+    
+    def get_loaded_heads(self) -> List[str]:
+        """Get list of currently loaded heads."""
+        return self.detector.get_loaded_heads()
+    
+    def get_available_signals(self) -> List[str]:
+        """Get list of all signals with trained heads."""
+        return self.detector.get_available_signals()
     
     def compute_spectrogram(self, iq_data: np.ndarray) -> torch.Tensor:
         """INFERENCE spectrogram - MUST MATCH TENSORCADE."""
@@ -555,45 +575,34 @@ class TripleBufferedPipeline:
         return resized.expand(-1, 3, -1, -1)
     
     def process_chunk(self, iq_data: np.ndarray, pts: float, score_threshold: float = 0.5) -> Dict[str, Any]:
-        """Run inference."""
+        """Run inference using HydraDetector."""
         stream_idx = self.current_stream
-        stream = self.streams[stream_idx]
         
         start_time = time.perf_counter()
         
-        if self.device.type == 'cuda' and stream is not None:
-            with torch.cuda.stream(stream):
-                spec = self.compute_spectrogram(iq_data)
-                with torch.inference_mode():
-                    outputs = self.model(spec.half())
-                torch.cuda.synchronize()
-        else:
-            spec = self.compute_spectrogram(iq_data)
-            with torch.inference_mode():
-                outputs = self.model(spec)
+        # Compute spectrogram (same as before)
+        spec = self.compute_spectrogram(iq_data)
         
+        # Use HydraDetector for inference
+        all_detections = self.detector.detect(spec, score_threshold=score_threshold)
+        
+        # Flatten results from all heads into single list
         detections = []
-        if outputs and len(outputs) > 0:
-            out = outputs[0]
-            mask = out['scores'] >= score_threshold
-            boxes = out['boxes'][mask].cpu().numpy()
-            scores = out['scores'][mask].cpu().numpy()
-            labels = out['labels'][mask].cpu().numpy()
-            
-            for i in range(len(boxes)):
-                box = boxes[i]
-                det = Detection(
-                    box_id=i,
-                    x1=float(box[0]) / 1024,  # Normalized 0-1
-                    y1=1.0 - (float(box[3]) / 1024),  # Flip Y axis and swap (y2->y1)
-                    x2=float(box[2]) / 1024,
-                    y2=1.0 - (float(box[1]) / 1024),  # Flip Y axis and swap (y1->y2)
-                    confidence=float(scores[i]),
-                    class_id=int(labels[i]),
-                    class_name=self.class_names[int(labels[i])] if int(labels[i]) < len(self.class_names) else 'unknown',
+        box_id = 0
+        for signal_name, signal_dets in all_detections.items():
+            for det in signal_dets:
+                detections.append(Detection(
+                    box_id=box_id,
+                    x1=det.x1,
+                    y1=det.y1,
+                    x2=det.x2,
+                    y2=det.y2,
+                    confidence=det.confidence,
+                    class_id=det.class_id,
+                    class_name=signal_name,  # Use signal name as class
                     parent_pts=pts,
-                )
-                detections.append(det)
+                ))
+                box_id += 1
         
         inference_ms = (time.perf_counter() - start_time) * 1000
         self.current_stream = (self.current_stream + 1) % self.num_streams
@@ -1035,6 +1044,19 @@ class VideoStreamServer:
                 timeout=30.0
             )
             
+            # DEBUG: Save FFT capture with detection boxes if any detections
+            if DEBUG_ENABLED and len(result['detections']) > 0:
+                # Recompute spectrogram for visualization (inference one is normalized)
+                spec = self.pipeline.compute_spectrogram(iq_data)
+                spec_np = spec[0, 0].cpu().numpy()  # [1024, 1024] grayscale
+                
+                det_boxes = [{
+                    'x1': d.x1, 'y1': d.y1, 'x2': d.x2, 'y2': d.y2,
+                    'class_name': d.class_name, 'confidence': d.confidence
+                } for d in result['detections']]
+                
+                capture_detection(spec_np, det_boxes, frame_id, label="hydra_detection")
+            
             # Build detection list WITH ROW OFFSET for perfect sync
             # Use the model's ACTUAL bounding box output directly
             det_list = [{
@@ -1317,6 +1339,112 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
                         print(f"[Pipeline] ERROR in set_colormap: {e}", flush=True)
                         import traceback
                         traceback.print_exc()
+                
+                # =====================================================
+                # HEAD MANAGEMENT COMMANDS - Dynamic signal loading
+                # =====================================================
+                
+                elif cmd == 'load_heads':
+                    # Load detection heads for mission signals
+                    # {"command": "load_heads", "signal_names": ["creamy_chicken", "lte_uplink"]}
+                    try:
+                        signal_names = data.get('signal_names', [])
+                        if not signal_names:
+                            await websocket.send(json.dumps({
+                                'type': 'error',
+                                'command': 'load_heads',
+                                'message': 'signal_names required (list of signal names)'
+                            }))
+                            continue
+                        
+                        print(f"[Pipeline] Loading heads: {signal_names}", flush=True)
+                        loaded = server.pipeline.load_heads(signal_names)
+                        
+                        await websocket.send(json.dumps({
+                            'type': 'heads_loaded',
+                            'requested': signal_names,
+                            'loaded': loaded,
+                        }))
+                        print(f"[Pipeline] Heads loaded: {loaded}", flush=True)
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in load_heads: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        await websocket.send(json.dumps({
+                            'type': 'error',
+                            'command': 'load_heads',
+                            'message': str(e)
+                        }))
+                
+                elif cmd == 'unload_heads':
+                    # Unload specific heads to free memory
+                    # {"command": "unload_heads", "signal_names": ["lte_uplink"]} or omit to unload all
+                    try:
+                        signal_names = data.get('signal_names')  # None means unload ALL
+                        
+                        print(f"[Pipeline] Unloading heads: {signal_names or 'ALL'}", flush=True)
+                        remaining = server.pipeline.unload_heads(signal_names)
+                        
+                        await websocket.send(json.dumps({
+                            'type': 'heads_unloaded',
+                            'unloaded': signal_names or 'all',
+                            'remaining': remaining,
+                        }))
+                        print(f"[Pipeline] Heads remaining after unload: {remaining}", flush=True)
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in unload_heads: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        await websocket.send(json.dumps({
+                            'type': 'error',
+                            'command': 'unload_heads',
+                            'message': str(e)
+                        }))
+                
+                elif cmd == 'get_loaded_heads':
+                    # Query currently loaded heads
+                    # {"command": "get_loaded_heads"}
+                    try:
+                        loaded = server.pipeline.get_loaded_heads()
+                        await websocket.send(json.dumps({
+                            'type': 'loaded_heads',
+                            'heads': loaded,
+                        }))
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in get_loaded_heads: {e}", flush=True)
+                        await websocket.send(json.dumps({
+                            'type': 'error',
+                            'command': 'get_loaded_heads',
+                            'message': str(e)
+                        }))
+                
+                elif cmd == 'get_available_signals':
+                    # Query all signals with trained heads (includes full registry with metrics)
+                    # {"command": "get_available_signals"}
+                    try:
+                        available = server.pipeline.get_available_signals()
+                        loaded = server.pipeline.get_loaded_heads()
+                        
+                        # Get full registry with metrics for each signal
+                        registry = server.pipeline.detector.get_registry()
+                        
+                        await websocket.send(json.dumps({
+                            'type': 'available_signals',
+                            'signals': available,
+                            'loaded': loaded,
+                            'registry': registry,  # Full metadata: f1_score, sample_count, etc.
+                        }))
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in get_available_signals: {e}", flush=True)
+                        await websocket.send(json.dumps({
+                            'type': 'error',
+                            'command': 'get_available_signals',
+                            'message': str(e)
+                        }))
     except Exception as e:
         logger.error(f"Video handler error: {e}")
     finally:

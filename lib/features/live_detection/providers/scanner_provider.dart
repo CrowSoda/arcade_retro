@@ -166,10 +166,14 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
     // Tune to first step immediately
     _tuneToCurrentStep();
     
-    // Start dwell timer
-    _startDwellTimer();
-    
-    debugPrint('[Scanner] Started scanning with ${state.dwellTimeSec}s dwell');
+    // SINGLE FREQUENCY OPTIMIZATION: Don't start dwell timer if only one step
+    // This avoids unnecessary API calls when there's nothing to scan through
+    if (state.steps.length > 1) {
+      _startDwellTimer();
+      debugPrint('[Scanner] Started scanning with ${state.dwellTimeSec}s dwell (${state.steps.length} steps)');
+    } else {
+      debugPrint('[Scanner] Single frequency mode - no dwell timer needed');
+    }
   }
 
   /// Stop scanning

@@ -173,6 +173,40 @@ flutter build windows --release
 - PyTorch with CUDA support
 - Windows: Visual Studio 2022 with C++ workload
 
+## TODO / Future Work
+
+### DMA Capture Implementation
+
+Current capture simulation reads from file and writes to disk in chunks. Production implementation needs:
+
+1. **DMA Ring Buffer Consumer** - Replace file source with FPGA/SDR DMA ring buffer
+   - Sidekiq NV100 streams IQ data via PCIe DMA to a ring buffer
+   - Consumer thread should read from ring buffer, not file
+   
+2. **Zero-Copy if Possible** - Use `mmap` or direct buffer access to avoid copying
+   - Current: `read() → Uint8List → writeFrom()`
+   - Goal: DMA buffer → disk with minimal CPU involvement
+
+3. **Buffer Overrun Handling** - If disk can't keep up with DMA rate:
+   - Log warning, drop oldest data
+   - Consider compression (LZ4) for slower disks
+   - Target: 61.44 MHz × 8 bytes = 491 MB/s sustained
+
+4. **Trigger-Based Capture** - Start/stop based on detection events
+   - Pre-roll buffer (keep last N seconds always)
+   - Post-roll after detection ends
+
+**Files to modify:**
+- `lib/features/live_detection/providers/sdr_config_provider.dart` - Replace `_openSourceIqFile()` with DMA buffer access
+- Backend needs new gRPC service for capture control (start/stop/status)
+
+### Other TODOs
+
+- [ ] Consolidate mission picker UI (inputs_panel.dart vs live_detection_screen.dart)
+- [ ] Hydra head training via Flutter UI
+- [ ] Multi-RX channel waterfall display
+- [ ] Real libsidekiq integration (replace stubs in `rx_state_provider.dart`)
+
 ## License
 
 Proprietary - Internal Use Only

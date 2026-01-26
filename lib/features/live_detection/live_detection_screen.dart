@@ -6,6 +6,7 @@ import 'providers/detection_provider.dart';
 import 'providers/map_provider.dart';
 import 'providers/inference_provider.dart';
 import 'providers/video_stream_provider.dart';
+import 'providers/mission_head_loader_provider.dart';
 import '../settings/settings_screen.dart' show waterfallFpsProvider;
 import '../config/config_screen.dart' show missionsProvider, activeMissionProvider, Mission;
 import 'widgets/video_waterfall_display.dart';
@@ -59,6 +60,10 @@ class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
   Widget build(BuildContext context) {
     // Trigger auto-start of inference when backend is ready
     ref.watch(autoStartInferenceProvider);
+    
+    // HYDRA: Watch mission head loader to auto-load detection heads when mission changes
+    // This ensures detection heads are loaded/unloaded when mission is activated/cleared
+    ref.watch(missionHeadLoaderProvider);
     
     final displayMode = ref.watch(displayModeProvider);
     final isCollapsed = ref.watch(rightPanelCollapsedProvider);
@@ -514,9 +519,21 @@ class _MissionPickerButton extends ConsumerWidget {
           debugPrint('[Live] BW: ${mission.bandwidthMhz} MHz, Dwell: ${mission.dwellTimeSec} sec');
           debugPrint('[Live] Ranges: ${mission.freqRanges.length}, Models: ${mission.models.length}');
           debugPrint('[Live] ════════════════════════════════════════');
+          
+          // HYDRA: Load detection heads for this mission
+          final signals = mission.models.map((m) => m.id).toList();
+          if (signals.isNotEmpty) {
+            debugPrint('[Live] Loading heads: $signals');
+            ref.read(videoStreamProvider.notifier).loadHeads(signals);
+          } else {
+            debugPrint('[Live] No models in mission - no heads to load');
+          }
         },
         onClear: () {
           ref.read(activeMissionProvider.notifier).state = null;
+          // Unload all heads when mission cleared
+          debugPrint('[Live] Mission cleared - unloading all heads');
+          ref.read(videoStreamProvider.notifier).unloadHeads();
           Navigator.pop(ctx);
         },
       ),

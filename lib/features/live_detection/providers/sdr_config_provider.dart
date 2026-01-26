@@ -584,108 +584,162 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
     state = const ManualCaptureState();
   }
 
+  /// Simulates streaming capture: reads chunks from source, writes chunks to disk
+  /// Uses G20 RFCAP format with 512-byte binary header for proper file loading
+  /// This mimics real SDR behavior where DMA streams to a ring buffer and we write to disk incrementally
   void _simulateCapture() async {
     final totalSeconds = state.captureDurationMinutes * 60;
-    const updateIntervalSeconds = 1;
+    final startTime = DateTime.now();
     
     // Capture parameters
     final signalName = state.signalName ?? 'UNKNOWN';
     final centerFreqMHz = double.tryParse(state.targetFreqMHz ?? '825.0') ?? 825.0;
-    final bandwidthMHz = 5.0;  // Narrowband capture
-    final sampleRate = 10e6;   // 10 MHz sample rate (matching source)
     
-    // Calculate bytes to read from source IQ file
-    // Each sample = 8 bytes (float32 I + float32 Q)
-    final bytesToCapture = (totalSeconds * sampleRate * 8).toInt();
-    
-    // Start capturing IQ data from the source file (runs in background)
-    Uint8List? capturedIqData;
-    _captureIqDataFromSource(bytesToCapture).then((data) {
-      capturedIqData = data;
-    });
-    
-    // Progress updates while capturing
-    for (int i = 0; i < totalSeconds && state.phase == CapturePhase.capturing; i++) {
-      await Future.delayed(const Duration(seconds: updateIntervalSeconds));
-      if (state.phase != CapturePhase.capturing) break;
-      
-      final progress = (i + 1) / totalSeconds;
-      state = state.copyWith(captureProgress: progress);
+    // Calculate bandwidth from box width (if available)
+    // Box x1/x2 are normalized 0-1, representing the 20 MHz capture bandwidth
+    const sourceBandwidthMHz = 20.0;  // Source file bandwidth
+    double bandwidthMHz = sourceBandwidthMHz;  // Default to full bandwidth
+    if (state.boxX1 != null && state.boxX2 != null) {
+      final boxWidth = (state.boxX2! - state.boxX1!).abs();
+      bandwidthMHz = boxWidth * sourceBandwidthMHz;
+      if (bandwidthMHz < 0.5) bandwidthMHz = 0.5;  // Minimum 500 kHz
     }
     
-    if (state.phase == CapturePhase.capturing) {
-      // Wait for IQ data capture to complete
-      while (capturedIqData == null && state.phase == CapturePhase.capturing) {
-        await Future.delayed(const Duration(milliseconds: 100));
+    // Source file sample rate - MUST match actual source file!
+    const sampleRate = 20e6;  // 20 MHz sample rate (matches 825MHz.sigmf-data)
+    
+    // Chunk size: 1 second of data = 20M samples * 8 bytes = 160 MB
+    // That's too big, use smaller chunks (1/10 second = 16 MB)
+    const samplesPerChunk = 2000000;  // 2M samples = 0.1 sec at 20 MHz
+    const chunkSizeBytes = samplesPerChunk * 8;  // 16 MB per chunk
+    final totalChunks = totalSeconds * 10;  // 10 chunks per second
+    final totalExpectedSamples = totalSeconds * 20000000;  // 20M samples/sec
+    
+    debugPrint('[Capture] Starting streaming capture: ${totalSeconds}s, ${totalChunks} chunks');
+    debugPrint('[Capture] Sample rate: ${(sampleRate / 1e6).toStringAsFixed(1)} MHz');
+    debugPrint('[Capture] Bandwidth: ${bandwidthMHz.toStringAsFixed(2)} MHz');
+    debugPrint('[Capture] Expected samples: $totalExpectedSamples');
+    
+    // Prepare output file with RFCAP format
+    final filename = RfcapService.generateFilename(signalName);
+    final currentDir = Directory.current.path;
+    var capturesDir = Directory('$currentDir/data/captures');
+    if (!await capturesDir.exists()) {
+      capturesDir = Directory('$currentDir/g20_demo/data/captures');
+      if (!await capturesDir.exists()) {
+        await capturesDir.create(recursive: true);
       }
+    }
+    final filepath = '${capturesDir.path}/$filename';
+    
+    // Open source file for reading
+    final sourceFile = await _openSourceIqFile();
+    if (sourceFile == null) {
+      debugPrint('[Capture] ERROR: Cannot open source IQ file');
+      state = state.copyWith(phase: CapturePhase.error);
+      return;
+    }
+    
+    // Open output file for streaming writes
+    final outputFile = await File(filepath).open(mode: FileMode.write);
+    var samplesWritten = 0;
+    var sourceOffset = 40 * 20000000 * 8;  // Start at 40s into source
+    
+    debugPrint('[Capture] Writing RFCAP to: $filepath');
+    
+    try {
+      // STEP 1: Write G20 RFCAP header (512 bytes) with estimated sample count
+      // We'll update the numSamples field at the end with actual count
+      final header = RfcapService.createHeader(
+        sampleRate: sampleRate,
+        centerFreqHz: centerFreqMHz * 1e6,
+        bandwidthHz: bandwidthMHz * 1e6,
+        numSamples: totalExpectedSamples,  // Initial estimate, updated later
+        signalName: signalName,
+        latitude: 35.0,   // Demo location
+        longitude: -106.0,
+        startTime: startTime,
+      );
+      await outputFile.writeFrom(header);
+      debugPrint('[Capture] Wrote 512-byte RFCAP header');
       
-      if (capturedIqData == null || capturedIqData!.isEmpty) {
-        debugPrint('Error: No IQ data captured');
-        state = state.copyWith(phase: CapturePhase.error);
-        return;
-      }
-      
-      // Save the file
-      try {
-        debugPrint('Saving capture file for $signalName (${(capturedIqData!.length / 1e6).toStringAsFixed(1)} MB)...');
+      // STEP 2: Stream IQ data chunks after header
+      for (int chunk = 0; chunk < totalChunks && state.phase == CapturePhase.capturing; chunk++) {
+        // Read chunk from source file
+        await sourceFile.setPosition(sourceOffset);
+        final chunkData = await sourceFile.read(chunkSizeBytes);
+        sourceOffset += chunkSizeBytes;
         
-        // Generate filename
-        final filename = RfcapService.generateFilename(signalName);
-        
-        // Find captures directory
-        final currentDir = Directory.current.path;
-        var capturesDir = Directory('$currentDir/data/captures');
-        if (!await capturesDir.exists()) {
-          capturesDir = Directory('$currentDir/g20_demo/data/captures');
-          if (!await capturesDir.exists()) {
-            await capturesDir.create(recursive: true);
-          }
+        // Wrap around if we hit end of source file
+        final sourceFileSize = await sourceFile.length();
+        if (sourceOffset >= sourceFileSize) {
+          sourceOffset = 0;
         }
         
-        final filepath = '${capturesDir.path}/$filename';
+        // Write chunk to output (after header)
+        await outputFile.writeFrom(chunkData);
+        samplesWritten += chunkData.length ~/ 8;  // 8 bytes per complex sample
         
-        // Write the file
-        await RfcapService.writeFile(
-          filepath: filepath,
-          sampleRate: sampleRate,
-          centerFreqHz: centerFreqMHz * 1e6,
-          bandwidthHz: bandwidthMHz * 1e6,
-          iqData: capturedIqData!,
-          signalName: signalName,
-          latitude: 35.0,  // Demo location
-          longitude: -106.0,
-        );
+        // Update progress
+        final progress = (chunk + 1) / totalChunks;
+        state = state.copyWith(captureProgress: progress);
         
-        debugPrint('Capture saved: $filepath');
+        // Wait 0.1 seconds (10 chunks/second = real-time capture)
+        await Future.delayed(const Duration(milliseconds: 100));
         
-        // Capture complete! Check queue for next item
+        // Log every second (every 10 chunks)
+        if (chunk % 10 == 0) {
+          final secondsElapsed = chunk ~/ 10;
+          debugPrint('[Capture] Progress: ${(progress * 100).toInt()}% (${secondsElapsed}s, $samplesWritten samples)');
+        }
+      }
+      
+      // STEP 3: Update header with actual sample count (seek back to offset 32)
+      await outputFile.setPosition(32);  // numSamples field is at offset 32
+      final sampleCountBytes = ByteData(8);
+      sampleCountBytes.setUint64(0, samplesWritten, Endian.little);
+      await outputFile.writeFrom(sampleCountBytes.buffer.asUint8List());
+      debugPrint('[Capture] Updated header with actual sample count: $samplesWritten');
+      
+      // Close files
+      await sourceFile.close();
+      await outputFile.close();
+      
+      if (state.phase == CapturePhase.capturing) {
+        final fileSizeMB = (512 + samplesWritten * 8) / 1e6;
+        debugPrint('[Capture] Complete: $filepath (${fileSizeMB.toStringAsFixed(1)} MB, $samplesWritten samples)');
+        
         state = state.copyWith(phase: CapturePhase.complete);
         
-        // Auto-process next in queue after a short delay
+        // Process next in queue
         await Future.delayed(const Duration(milliseconds: 500));
         if (state.queue.isNotEmpty) {
           _processNextInQueue();
         } else {
-          // Reset to idle when queue is empty
           state = const ManualCaptureState();
         }
-      } catch (e) {
-        debugPrint('Error saving capture: $e');
-        state = state.copyWith(phase: CapturePhase.error);
-        
-        // Even on error, try to process next in queue
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (state.queue.isNotEmpty) {
-          _processNextInQueue();
-        }
+      } else {
+        // Capture was cancelled - header still valid with partial data
+        debugPrint('[Capture] Cancelled after $samplesWritten samples');
+      }
+      
+    } catch (e) {
+      debugPrint('[Capture] ERROR: $e');
+      await sourceFile.close();
+      await outputFile.close();
+      state = state.copyWith(phase: CapturePhase.error);
+      
+      // Try next in queue even on error
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (state.queue.isNotEmpty) {
+        _processNextInQueue();
       }
     }
   }
 
-  /// Capture IQ data from the source file that the waterfall is streaming from
-  Future<Uint8List> _captureIqDataFromSource(int bytesToRead) async {
+  /// Open the source IQ file for reading
+  Future<RandomAccessFile?> _openSourceIqFile() async {
     try {
-      // Find the source IQ file (same logic as waterfall_provider)
       final currentDir = Directory.current.path;
       var iqPath = '$currentDir/data/825MHz.sigmf-data';
       var file = File(iqPath);
@@ -696,37 +750,14 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       }
       
       if (!await file.exists()) {
-        debugPrint('ERROR: Source IQ file not found');
-        return Uint8List(0);
+        debugPrint('[Capture] Source IQ file not found');
+        return null;
       }
       
-      final fileSize = await file.length();
-      
-      // Start at offset 40s into file (same as waterfall) or random position
-      var offset = 40 * 20000000 * 8;  // 40s at 20MHz, 8 bytes/sample
-      
-      // Make sure we don't read past end of file
-      if (offset + bytesToRead > fileSize) {
-        offset = 0;  // Wrap to beginning
-      }
-      if (bytesToRead > fileSize) {
-        bytesToRead = fileSize;  // Clamp to file size
-      }
-      
-      debugPrint('Reading IQ data: $bytesToRead bytes from offset $offset');
-      
-      // Read the IQ data
-      final raf = await file.open(mode: FileMode.read);
-      await raf.setPosition(offset);
-      final data = await raf.read(bytesToRead);
-      await raf.close();
-      
-      debugPrint('Read ${data.length} bytes of IQ data');
-      return data;
-      
+      return await file.open(mode: FileMode.read);
     } catch (e) {
-      debugPrint('Error reading source IQ: $e');
-      return Uint8List(0);
+      debugPrint('[Capture] Error opening source: $e');
+      return null;
     }
   }
 

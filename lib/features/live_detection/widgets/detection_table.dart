@@ -54,7 +54,7 @@ class DetectionTable extends ConsumerWidget {
             children: const [
               SizedBox(width: 28), // Eye icon + Color indicator space
               Expanded(
-                flex: 3,
+                flex: 5,  // Increased for longer signal names
                 child: Text('Name', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: G20Colors.textSecondaryDark)),
               ),
               Expanded(
@@ -135,7 +135,7 @@ class _DetectionRow extends ConsumerWidget {
             const SizedBox(width: 8),
             // Name
             Expanded(
-              flex: 3,
+              flex: 5,  // Match header
               child: Text(
                 detection.className,
                 style: TextStyle(

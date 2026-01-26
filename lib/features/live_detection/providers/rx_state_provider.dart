@@ -56,9 +56,9 @@ class RxChannelState {
         return '🤖 SCAN';
       case RxMode.manual:
         if (countdownSeconds != null) {
-          return '✋ ${countdownSeconds}s';
+          return '🔴 ${countdownSeconds}s';  // Recording with countdown
         }
-        return '✋ HOLD';
+        return '🔴 REC';  // Manual recording (no countdown = permanent)
       case RxMode.idle:
         return '⏸️ IDLE';
       case RxMode.error:

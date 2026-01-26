@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import '../../core/config/theme.dart';
 import '../live_detection/widgets/inputs_panel.dart' show showFadingToast;
+import '../live_detection/providers/video_stream_provider.dart';
 
 // ============================================================================
 // DATA MODELS
@@ -108,32 +109,75 @@ class Mission {
 // PROVIDERS
 // ============================================================================
 
-/// Scans models/ folder and returns available models
+/// Available Hydra heads - READ FROM REGISTRY.JSON
+/// 
+/// registry.json is THE source of truth maintained by the backend.
+/// Contains all signals with validated metrics (F1, sample_count, version, etc.)
+/// 
+/// Structure:
+/// {
+///   "backbone_version": 1,
+///   "signals": {
+///     "creamy_chicken": {
+///       "active_head_version": 1,
+///       "sample_count": 200,
+///       "f1_score": 0.93,
+///       "head_path": "heads/creamy_chicken/active.pth",
+///       ...
+///     }
+///   }
+/// }
 final availableModelsProvider = FutureProvider<List<ModelPriority>>((ref) async {
-  final modelsDir = Directory('models');
-  if (!await modelsDir.exists()) return [];
-  
-  final models = <ModelPriority>[];
-  final validExtensions = ['.pth', '.trt', '.onnx', '.pt', '.engine'];
-  
-  await for (final entity in modelsDir.list()) {
-    if (entity is File) {
-      final ext = p.extension(entity.path).toLowerCase();
-      if (validExtensions.contains(ext)) {
-        final name = p.basenameWithoutExtension(entity.path);
-        models.add(ModelPriority(
-          id: entity.path,
-          name: name,
-          filePath: entity.path,
-          signalType: null, // User links to signal type
-          priority: 0,
-        ));
-      }
-    }
+  final registryFile = File('models/registry.json');
+  if (!await registryFile.exists()) {
+    debugPrint('[Models] No registry.json found - run backend to generate');
+    return [];
   }
   
-  models.sort((a, b) => a.name.compareTo(b.name));
-  return models;
+  try {
+    final registryJson = await registryFile.readAsString();
+    final registry = json.decode(registryJson) as Map<String, dynamic>;
+    final signals = registry['signals'] as Map<String, dynamic>? ?? {};
+    
+    final models = <ModelPriority>[];
+    
+    for (final entry in signals.entries) {
+      final signalName = entry.key;
+      final data = entry.value as Map<String, dynamic>;
+      
+      // Build metrics display string
+      final f1Score = (data['f1_score'] as num?)?.toDouble() ?? 0.0;
+      final sampleCount = data['sample_count'] as int? ?? 0;
+      final version = data['active_head_version'] as int? ?? 1;
+      
+      String? metricsInfo;
+      if (f1Score > 0) {
+        metricsInfo = 'v$version • F1: ${(f1Score * 100).toInt()}% • $sampleCount samples';
+      } else if (sampleCount > 0) {
+        metricsInfo = 'v$version • $sampleCount samples';
+      } else {
+        metricsInfo = 'v$version';
+      }
+      
+      final headPath = data['head_path'] as String? ?? 'heads/$signalName/active.pth';
+      
+      models.add(ModelPriority(
+        id: signalName,
+        name: signalName,
+        filePath: headPath,
+        signalType: metricsInfo,
+        priority: 0,
+      ));
+    }
+    
+    models.sort((a, b) => a.name.compareTo(b.name));
+    debugPrint('[Models] Loaded ${models.length} heads from registry: ${models.map((m) => m.name).join(', ')}');
+    return models;
+    
+  } catch (e) {
+    debugPrint('[Models] Error reading registry.json: $e');
+    return [];
+  }
 });
 
 /// All saved missions - persisted to config/missions.json
@@ -525,6 +569,14 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
     showFadingToast(context, 'Mission "${updated.name}" saved', icon: Icons.save, color: Colors.green.shade700);
     
     debugPrint('[Mission] Saved: ${updated.name}');
+    
+    // If this mission is currently ACTIVE, reload heads to pick up changes
+    final activeMission = ref.read(activeMissionProvider);
+    if (activeMission != null && activeMission.id == updated.id) {
+      final signals = updated.models.map((m) => m.id).toList();
+      debugPrint('[Mission] Active mission updated - reloading heads: $signals');
+      ref.read(videoStreamProvider.notifier).loadHeads(signals);
+    }
   }
 
   /// Load mission and send configuration to backend
@@ -542,10 +594,10 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
       models: _selectedModels,
     );
     
-    // Set as active mission (other parts of app can watch this)
+    // Set as active mission
     ref.read(activeMissionProvider.notifier).state = updatedMission;
     
-    // Log mission config (backend integration is stubbed)
+    // Log mission config
     debugPrint('[Config] ════════════════════════════════════════');
     debugPrint('[Config] LOADING MISSION: ${_nameController.text}');
     debugPrint('[Config] ════════════════════════════════════════');
@@ -557,13 +609,21 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
     }
     debugPrint('[Config] Models (priority order): ${_selectedModels.length}');
     for (final m in _selectedModels) {
-      debugPrint('[Config]   ${m.priority + 1}. ${m.name} (${m.filePath})');
+      debugPrint('[Config]   ${m.priority + 1}. ${m.name}');
     }
     debugPrint('[Config] ════════════════════════════════════════');
     
-    // TODO: When backend supports mission loading:
-    // final videoStream = ref.read(videoStreamProvider.notifier);
-    // videoStream.loadMission(updatedMission);
+    // LOAD HEADS VIA BACKEND API
+    final signals = _selectedModels.map((m) => m.id).toList();
+    if (signals.isNotEmpty) {
+      debugPrint('[Config] Loading heads via backend: $signals');
+      ref.read(videoStreamProvider.notifier).loadHeads(signals);
+      showFadingToast(context, 'Mission loaded - ${signals.length} detectors active', icon: Icons.rocket_launch, color: G20Colors.primary);
+    } else {
+      debugPrint('[Config] No models in mission - unloading all heads');
+      ref.read(videoStreamProvider.notifier).unloadHeads();
+      showFadingToast(context, 'Mission loaded - no detectors', icon: Icons.warning, color: Colors.orange);
+    }
   }
 
   @override
@@ -582,6 +642,8 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
               Expanded(child: Text('Edit: ${widget.mission.name}', style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16, fontWeight: FontWeight.w600))),
               const SizedBox(width: 8),
               ElevatedButton.icon(onPressed: _save, icon: const Icon(Icons.save, size: 18), label: const Text('Save'), style: ElevatedButton.styleFrom(backgroundColor: G20Colors.primary)),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(onPressed: _loadMission, icon: const Icon(Icons.rocket_launch, size: 18), label: const Text('Load'), style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700)),
             ],
           ),
           const Divider(),
@@ -790,10 +852,13 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
         ),
         const SizedBox(height: 8),
         _selectedModels.isEmpty
-            ? Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: G20Colors.backgroundDark, borderRadius: BorderRadius.circular(6), border: Border.all(color: G20Colors.cardDark)),
-                child: const Center(child: Text('No models - click + to add from models/ folder', style: TextStyle(color: Colors.grey))),
+            ? GestureDetector(
+                onTap: _addModel,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: G20Colors.backgroundDark, borderRadius: BorderRadius.circular(6), border: Border.all(color: G20Colors.cardDark)),
+                  child: const Center(child: Text('Click to add models', style: TextStyle(color: Colors.grey))),
+                ),
               )
             : ReorderableListView.builder(
                 shrinkWrap: true,
@@ -822,7 +887,9 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
                       child: Center(child: Text('${index + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
                     ),
                     title: Text(model.name, style: const TextStyle(color: G20Colors.textPrimaryDark)),
-                    subtitle: Text(model.filePath, style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10)),
+                    subtitle: model.signalType != null 
+                        ? Text(model.signalType!, style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10))
+                        : null,
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -841,12 +908,11 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
     final available = widget.availableModels.where((m) => !_selectedModels.any((s) => s.id == m.id)).toList();
 
     if (available.isEmpty) {
-      // Show dialog instead of snackbar
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('No Models Available'),
-          content: const Text('All models from models/ folder are already added.'),
+          title: const Text('All Models Added'),
+          content: const Text('All available signal detectors are already in this mission.'),
           actions: [
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx),
@@ -861,7 +927,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Model from models/ folder'),
+        title: const Text('Add Signal Detector'),
         content: SizedBox(
           width: 400,
           child: ListView.builder(
@@ -872,7 +938,9 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
               return ListTile(
                 leading: const Icon(Icons.psychology),
                 title: Text(model.name),
-                subtitle: Text(model.filePath, style: const TextStyle(fontSize: 11)),
+                subtitle: model.signalType != null 
+                    ? Text(model.signalType!, style: TextStyle(fontSize: 11, color: G20Colors.textSecondaryDark))
+                    : null,
                 onTap: () {
                   setState(() => _selectedModels.add(model.copyWith(priority: _selectedModels.length)));
                   Navigator.pop(ctx);

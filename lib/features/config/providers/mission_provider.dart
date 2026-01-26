@@ -331,23 +331,31 @@ final missionLoadingProvider = Provider<bool>((ref) {
 });
 
 /// Provider that applies mission settings to the video stream when mission changes
-/// Import this provider in your main app to enable auto-apply
+/// The actual head loading is done by missionHeadLoaderProvider in live_detection/providers/
+/// This provider just logs mission changes for debugging
 final missionApplierProvider = Provider<void>((ref) {
   // Watch for mission changes
   ref.listen<MissionState>(missionProvider, (previous, next) {
     final mission = next.activeMission;
+    
+    // If mission cleared, log it
+    if (mission == null && previous?.activeMission != null) {
+      debugPrint('[MissionApplier] Mission cleared');
+      return;
+    }
+    
     if (mission == null) return;
     
-    // Only apply if mission actually changed
+    // Only log if mission actually changed
     if (previous?.activeMission?.filePath == mission.filePath &&
         previous?.activeMission?.modified == mission.modified) {
       return;
     }
     
-    debugPrint('[MissionApplier] Applying mission settings: ${mission.name}');
+    debugPrint('[MissionApplier] Mission changed: ${mission.name}');
+    debugPrint('[MissionApplier] Effective signals: ${mission.effectiveSignals}');
     
-    // Import video stream provider dynamically to avoid circular deps
-    // Settings will be applied via WebSocket commands
-    // This is handled by mission_screen.dart via direct provider access
+    // Note: Actual head loading is handled by missionHeadLoaderProvider
+    // in lib/features/live_detection/providers/mission_head_loader_provider.dart
   });
 });

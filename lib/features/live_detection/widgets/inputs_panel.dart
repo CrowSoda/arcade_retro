@@ -520,6 +520,15 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                                   // Set mission as active
                                   ref.read(activeMissionProvider.notifier).state = mission;
                                   
+                                  // HYDRA: Load detection heads for this mission
+                                  final signals = mission.models.map((m) => m.id).toList();
+                                  if (signals.isNotEmpty) {
+                                    debugPrint('[Mission] Loading heads: $signals');
+                                    ref.read(videoStreamProvider.notifier).loadHeads(signals);
+                                  } else {
+                                    debugPrint('[Mission] No models in mission - no heads to load');
+                                  }
+                                  
                                   // Load mission into scanner and start stepped scanning
                                   final scanner = ref.read(scannerProvider.notifier);
                                   scanner.loadMission(mission);
@@ -534,16 +543,16 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                                   
                                   Navigator.pop(ctx);
                                   
-                                  // Show fading toast with step count
+                                  // Show fading toast with step count and head count
                                   final stepCount = ref.read(scannerProvider).totalSteps;
                                   showFadingToast(
                                     context, 
-                                    'Mission "${mission.name}" - $stepCount steps', 
+                                    'Mission "${mission.name}" - $stepCount steps, ${signals.length} detectors', 
                                     icon: Icons.rocket_launch, 
                                     color: Colors.green.shade700,
                                   );
                                   
-                                  debugPrint('[Mission] Loaded: ${mission.name} with $stepCount steps');
+                                  debugPrint('[Mission] Loaded: ${mission.name} with $stepCount steps, ${signals.length} heads');
                                   
                                   // Update freq text field
                                   setState(() {

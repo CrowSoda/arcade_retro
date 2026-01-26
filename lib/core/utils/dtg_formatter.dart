@@ -4,9 +4,20 @@
 const _months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
                  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
-/// Format DateTime to DTG: DDHHMMZ MMM YY
-/// Example: 211835Z JAN 26
+/// Format DateTime to display-friendly DTG: DD MMM HH:MM
+/// Example: 21 JAN 18:35
+/// This is more readable in tables than full military DTG
 String formatDTG(DateTime dt) {
+  final day = dt.day.toString().padLeft(2, '0');
+  final hour = dt.hour.toString().padLeft(2, '0');
+  final min = dt.minute.toString().padLeft(2, '0');
+  final month = _months[dt.month - 1];
+  return '$day $month $hour:$min';
+}
+
+/// Format DateTime to full military DTG: DDHHMMZ MMM YY
+/// Example: 211835Z JAN 26
+String formatDTGFull(DateTime dt) {
   final day = dt.day.toString().padLeft(2, '0');
   final hour = dt.hour.toString().padLeft(2, '0');
   final min = dt.minute.toString().padLeft(2, '0');

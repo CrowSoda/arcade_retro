@@ -163,6 +163,18 @@ except ImportError:
 from inference import InferenceEngine, MultiModelEngine, SpectrogramPipeline
 from unified_pipeline import video_ws_handler
 
+# Hydra imports (Phase 5)
+HYDRA_AVAILABLE = False
+try:
+    from hydra.detector import HydraDetector
+    from hydra.version_manager import VersionManager
+    from training.service import TrainingService, TrainingProgress
+    from training.sample_manager import SampleManager
+    from training.splits import SplitManager
+    HYDRA_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Hydra modules not available: {e}")
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("g20.server")
 
@@ -1188,6 +1200,334 @@ async def video_pipeline_handler(websocket):
             pass
 
 
+# ============= Training WebSocket Handler (Hydra Phase 5) =============
+
+async def ws_training_handler(websocket):
+    """WebSocket handler for Hydra training and version management.
+    
+    Commands:
+        - get_registry: Get all signals and versions
+        - get_version_history: Get version history for a signal
+        - train_signal: Train new or extend existing signal
+        - cancel_training: Cancel running training
+        - promote_version: Promote a version
+        - rollback_signal: Rollback to previous version
+        - save_sample: Save training sample (IQ + boxes)
+        - get_samples: List samples for a signal
+    """
+    import json
+    import traceback
+    
+    print("[Training] Handler started", flush=True)
+    
+    if not HYDRA_AVAILABLE:
+        await websocket.send(json.dumps({
+            "type": "error",
+            "message": "Hydra training modules not available"
+        }))
+        return
+    
+    # Initialize services
+    training_service = TrainingService(
+        models_dir=str(MODELS_DIR),
+        training_data_dir=str(BASE_DIR / "training_data" / "signals")
+    )
+    version_manager = VersionManager(str(MODELS_DIR))
+    sample_manager = SampleManager(str(BASE_DIR / "training_data" / "signals"))
+    split_manager = SplitManager(str(BASE_DIR / "training_data" / "signals"))
+    
+    training_task = None
+    
+    def make_progress_callback(ws):
+        """Create callback for training progress updates."""
+        async def send_progress(progress: TrainingProgress):
+            try:
+                await ws.send(json.dumps({
+                    "type": "training_progress",
+                    "signal_name": training_service._current_signal,
+                    "epoch": progress.epoch,
+                    "total_epochs": progress.total_epochs,
+                    "train_loss": progress.train_loss,
+                    "val_loss": progress.val_loss,
+                    "f1_score": progress.f1_score,
+                    "precision": progress.precision,
+                    "recall": progress.recall,
+                    "is_best": progress.is_best,
+                    "elapsed_sec": progress.elapsed_sec,
+                }))
+            except Exception as e:
+                print(f"[Training] Progress send error: {e}", flush=True)
+        
+        def callback(progress: TrainingProgress):
+            # Schedule async send from sync callback
+            try:
+                asyncio.get_event_loop().create_task(send_progress(progress))
+            except RuntimeError:
+                pass
+        
+        return callback
+    
+    try:
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                cmd = data.get("command")
+                print(f"[Training] Command: {cmd}", flush=True)
+                
+                # =====================
+                # Registry & Versions
+                # =====================
+                
+                if cmd == "get_registry":
+                    registry = version_manager.get_registry()
+                    await websocket.send(json.dumps({
+                        "type": "registry",
+                        **registry
+                    }))
+                
+                elif cmd == "get_version_history":
+                    signal_name = data.get("signal_name")
+                    if not signal_name:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name required"
+                        }))
+                        continue
+                    
+                    versions = version_manager.get_version_history(signal_name)
+                    info = version_manager.get_signal_info(signal_name) or {}
+                    
+                    await websocket.send(json.dumps({
+                        "type": "version_history",
+                        "signal_name": signal_name,
+                        "active_version": info.get("active_head_version"),
+                        "versions": versions
+                    }))
+                
+                elif cmd == "promote_version":
+                    signal_name = data.get("signal_name")
+                    version = data.get("version")
+                    
+                    if not signal_name or not version:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name and version required"
+                        }))
+                        continue
+                    
+                    try:
+                        version_manager.promote_version(signal_name, version, "Manual promotion from UI")
+                        await websocket.send(json.dumps({
+                            "type": "version_promoted",
+                            "signal_name": signal_name,
+                            "version": version
+                        }))
+                    except Exception as e:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": str(e)
+                        }))
+                
+                elif cmd == "rollback_signal":
+                    signal_name = data.get("signal_name")
+                    
+                    if not signal_name:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name required"
+                        }))
+                        continue
+                    
+                    try:
+                        new_version = version_manager.rollback(signal_name)
+                        await websocket.send(json.dumps({
+                            "type": "version_rollback",
+                            "signal_name": signal_name,
+                            "active_version": new_version
+                        }))
+                    except Exception as e:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": str(e)
+                        }))
+                
+                # =====================
+                # Training
+                # =====================
+                
+                elif cmd == "train_signal":
+                    signal_name = data.get("signal_name")
+                    notes = data.get("notes")
+                    is_new = data.get("is_new", False)
+                    
+                    if not signal_name:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name required"
+                        }))
+                        continue
+                    
+                    if training_service.is_training:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "Training already in progress"
+                        }))
+                        continue
+                    
+                    # Run training in background
+                    async def run_training():
+                        try:
+                            callback = make_progress_callback(websocket)
+                            
+                            if is_new:
+                                result = training_service.train_new_signal(
+                                    signal_name, notes=notes, callback=callback
+                                )
+                            else:
+                                result = training_service.extend_signal(
+                                    signal_name, notes=notes, callback=callback
+                                )
+                            
+                            await websocket.send(json.dumps({
+                                "type": "training_complete",
+                                "signal_name": result.signal_name,
+                                "version": result.version,
+                                "sample_count": result.sample_count,
+                                "epochs_trained": result.epochs_trained,
+                                "early_stopped": result.early_stopped,
+                                "metrics": result.metrics,
+                                "training_time_sec": result.training_time_sec,
+                                "previous_version": result.previous_version,
+                                "previous_metrics": result.previous_metrics,
+                                "auto_promoted": result.auto_promoted,
+                                "promotion_reason": result.promotion_reason,
+                            }))
+                        except Exception as e:
+                            print(f"[Training] Error: {e}", flush=True)
+                            traceback.print_exc()
+                            await websocket.send(json.dumps({
+                                "type": "training_failed",
+                                "signal_name": signal_name,
+                                "error": str(e)
+                            }))
+                    
+                    training_task = asyncio.create_task(run_training())
+                
+                elif cmd == "cancel_training":
+                    training_service.cancel_training()
+                    await websocket.send(json.dumps({
+                        "type": "training_cancelled"
+                    }))
+                
+                elif cmd == "get_training_status":
+                    status = training_service.get_training_status()
+                    await websocket.send(json.dumps({
+                        "type": "training_status",
+                        **status
+                    }))
+                
+                # =====================
+                # Training Samples
+                # =====================
+                
+                elif cmd == "save_sample":
+                    signal_name = data.get("signal_name")
+                    iq_data_b64 = data.get("iq_data")
+                    boxes = data.get("boxes", [])
+                    metadata = data.get("metadata", {})
+                    
+                    if not signal_name or not iq_data_b64:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name and iq_data required"
+                        }))
+                        continue
+                    
+                    try:
+                        sample_id = sample_manager.save_sample(
+                            signal_name, iq_data_b64, boxes, metadata
+                        )
+                        
+                        await websocket.send(json.dumps({
+                            "type": "sample_saved",
+                            "signal_name": signal_name,
+                            "sample_id": sample_id,
+                            "total_samples": sample_manager.get_sample_count(signal_name)
+                        }))
+                    except Exception as e:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": str(e)
+                        }))
+                
+                elif cmd == "get_samples":
+                    signal_name = data.get("signal_name")
+                    
+                    if not signal_name:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name required"
+                        }))
+                        continue
+                    
+                    samples = sample_manager.list_samples(signal_name)
+                    split_summary = split_manager.get_split_summary(signal_name)
+                    
+                    await websocket.send(json.dumps({
+                        "type": "samples_list",
+                        "signal_name": signal_name,
+                        "samples": samples,
+                        "split": split_summary
+                    }))
+                
+                elif cmd == "delete_sample":
+                    signal_name = data.get("signal_name")
+                    sample_id = data.get("sample_id")
+                    
+                    if not signal_name or not sample_id:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "signal_name and sample_id required"
+                        }))
+                        continue
+                    
+                    deleted = sample_manager.delete_sample(signal_name, sample_id)
+                    await websocket.send(json.dumps({
+                        "type": "sample_deleted" if deleted else "error",
+                        "signal_name": signal_name,
+                        "sample_id": sample_id,
+                        "message": None if deleted else "Sample not found"
+                    }))
+                
+                else:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": f"Unknown command: {cmd}"
+                    }))
+            
+            except json.JSONDecodeError:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": "Invalid JSON"
+                }))
+            except Exception as e:
+                print(f"[Training] Command error: {e}", flush=True)
+                traceback.print_exc()
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": str(e)
+                }))
+    
+    except Exception as e:
+        print(f"[Training] Handler error: {e}", flush=True)
+        traceback.print_exc()
+    finally:
+        if training_task and not training_task.done():
+            training_service.cancel_training()
+            training_task.cancel()
+        print("[Training] Handler closed", flush=True)
+
+
 async def ws_router(websocket):
     """Route WebSocket connections based on path."""
     import json
@@ -1213,7 +1553,10 @@ async def ws_router(websocket):
         ws_path = '/'
     
     try:
-        if '/video' in ws_path:
+        if '/training' in ws_path:
+            print("[Router] Routing to ws_training_handler (Hydra training/versioning)", flush=True)
+            await ws_training_handler(websocket)
+        elif '/video' in ws_path:
             print("[Router] Routing to video_ws_handler (H.264/JPEG streaming with set_time_span support)", flush=True)
             # Find IQ file and model for video_ws_handler
             iq_file = None
