@@ -11,7 +11,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../config/config_screen.dart' show Mission, FreqRange, activeMissionProvider;
+import '../../config/config_screen.dart' show Mission, FreqRange;
 import 'sdr_config_provider.dart';
 import 'waterfall_provider.dart';
 import 'rx_state_provider.dart';

@@ -2,14 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/theme.dart';
+import '../../core/services/backend_launcher.dart';
 import '../live_detection/providers/video_stream_provider.dart';
 
-/// Auto-tune delay setting (null = disabled, otherwise seconds)
-final autoTuneDelayProvider = StateProvider<int?>((ref) => null);  // Disabled by default
+/// Auto-tune delay setting - DEFAULT 2 seconds (no setting UI needed)
+/// Automatically tunes to frequency 2s after user stops typing
+final autoTuneDelayProvider = StateProvider<int?>((ref) => 2);  // Default 2s
 
 /// Score threshold for detection filtering (0.0 - 1.0)
-/// Default 0.5 (50%) - matches backend default
-final scoreThresholdProvider = StateProvider<double>((ref) => 0.5);
+/// Default 0.9 (90%) - higher confidence for production use
+final scoreThresholdProvider = StateProvider<double>((ref) => 0.9);
+
+/// Skip first waterfall frame on connection (avoids garbage/initialization data)
+final skipFirstWaterfallFrameProvider = StateProvider<bool>((ref) => false);
+
+/// Waterfall min dB setting - noise floor display
+final waterfallMinDbProvider = StateProvider<double>((ref) => -100.0);
+
+/// Waterfall max dB setting - peak display
+final waterfallMaxDbProvider = StateProvider<double>((ref) => -20.0);
+
+/// Backend version - derived from connection state
+final backendVersionProvider = Provider<String>((ref) {
+  final backendState = ref.watch(backendLauncherProvider);
+  if (backendState.wsPort != null) {
+    return backendState.version ?? '1.0.0 (connected)';
+  }
+  return 'Not Connected';
+});
 
 /// Waterfall FFT size setting
 /// Controls frequency resolution vs performance tradeoff
@@ -50,14 +70,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _udpPortController = TextEditingController(text: '5000');
   bool _autoConnect = true;
 
-  // Display settings
-  double _minDb = -100;
-  double _maxDb = -20;
+  // Display settings (colormap only - dB is now provider-based)
   int _colormap = 0;
 
   // System info
   final String _appVersion = '1.0.0';
-  final String _backendVersion = 'Not Connected';
 
   @override
   void dispose() {
@@ -141,42 +158,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               // FFT Size Selector - GPU-accelerated FFT resolution control
               const _FftSizeSelector(),
               const SizedBox(height: 16),
-              // =============================================================
-              // WATERFALL SIZE/FPS SETTINGS - DISABLED
-              // Hardcoded to 2.5s @ 30fps for optimal performance.
-              // Larger buffers cause FPS drops. Re-enable if needed for debugging.
-              // =============================================================
-              // const _WaterfallTimeSpanSelector(),
-              // const SizedBox(height: 16),
-              // const _WaterfallFpsSelector(),
-              // const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildSlider(
-                      label: 'Min dB',
-                      value: _minDb,
-                      min: -120,
-                      max: -60,
-                      divisions: 12,
-                      suffix: ' dB',
-                      onChanged: (v) => setState(() => _minDb = v),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildSlider(
-                      label: 'Max dB',
-                      value: _maxDb,
-                      min: -60,
-                      max: 0,
-                      divisions: 12,
-                      suffix: ' dB',
-                      onChanged: (v) => setState(() => _maxDb = v),
-                    ),
-                  ),
-                ],
-              ),
+              // dB Range selectors - wired to providers
+              const _DbRangeSelector(),
+              const SizedBox(height: 16),
+              // Skip first frame toggle
+              const _SkipFirstFrameToggle(),
               const SizedBox(height: 12),
               _buildDropdown(
                 label: 'Colormap',
@@ -243,10 +229,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 title: const Text('App Version'),
                 trailing: Text(_appVersion),
               ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Backend Version'),
-                trailing: Text(_backendVersion),
+              // Backend version - wired to provider
+              Consumer(
+                builder: (context, ref, _) {
+                  final version = ref.watch(backendVersionProvider);
+                  final isConnected = version != 'Not Connected';
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Backend Version'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isConnected ? G20Colors.success : G20Colors.error,
+                          ),
+                        ),
+                        Text(
+                          version,
+                          style: TextStyle(
+                            color: isConnected ? G20Colors.textPrimaryDark : G20Colors.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 8),
               Row(
@@ -1207,6 +1219,178 @@ class _FftSizeOption extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// dB Range selector - controls min/max dB for waterfall display
+/// Wired to providers and sends to backend
+class _DbRangeSelector extends ConsumerWidget {
+  const _DbRangeSelector();
+
+  void _setDbRange(WidgetRef ref, {double? minDb, double? maxDb}) {
+    if (minDb != null) {
+      ref.read(waterfallMinDbProvider.notifier).state = minDb;
+    }
+    if (maxDb != null) {
+      ref.read(waterfallMaxDbProvider.notifier).state = maxDb;
+    }
+    
+    // Send to backend
+    final currentMin = ref.read(waterfallMinDbProvider);
+    final currentMax = ref.read(waterfallMaxDbProvider);
+    ref.read(videoStreamProvider.notifier).setDbRange(currentMin, currentMax);
+    debugPrint('[Settings] dB range changed: $currentMin to $currentMax dB');
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final minDb = ref.watch(waterfallMinDbProvider);
+    final maxDb = ref.watch(waterfallMaxDbProvider);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Display Dynamic Range',
+          style: TextStyle(
+            fontSize: 14,
+            color: G20Colors.textPrimaryDark,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Adjust noise floor (min) and peak (max) display levels',
+          style: TextStyle(
+            fontSize: 11,
+            color: G20Colors.textSecondaryDark,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Min dB',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: G20Colors.textSecondaryDark,
+                        ),
+                      ),
+                      Text(
+                        '${minDb.toStringAsFixed(0)} dB',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: minDb,
+                    min: -120,
+                    max: -60,
+                    divisions: 12,
+                    onChanged: (v) => _setDbRange(ref, minDb: v),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Max dB',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: G20Colors.textSecondaryDark,
+                        ),
+                      ),
+                      Text(
+                        '${maxDb.toStringAsFixed(0)} dB',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: maxDb,
+                    min: -60,
+                    max: 0,
+                    divisions: 12,
+                    onChanged: (v) => _setDbRange(ref, maxDb: v),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // Dynamic range indicator
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: G20Colors.cardDark,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Dynamic Range: ',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: G20Colors.textSecondaryDark,
+                ),
+              ),
+              Text(
+                '${(maxDb - minDb).toStringAsFixed(0)} dB',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: G20Colors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Skip first waterfall frame toggle
+/// Useful to avoid garbage/initialization data on initial connection
+class _SkipFirstFrameToggle extends ConsumerWidget {
+  const _SkipFirstFrameToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final skipFirst = ref.watch(skipFirstWaterfallFrameProvider);
+    
+    return SwitchListTile(
+      title: const Text('Skip First Waterfall Frame'),
+      subtitle: Text(
+        'Discard initial frame on connection (avoids garbage data)',
+        style: TextStyle(
+          fontSize: 11,
+          color: G20Colors.textSecondaryDark,
+        ),
+      ),
+      value: skipFirst,
+      onChanged: (v) {
+        ref.read(skipFirstWaterfallFrameProvider.notifier).state = v;
+        // Notify video stream provider
+        ref.read(videoStreamProvider.notifier).setSkipFirstFrame(v);
+        debugPrint('[Settings] Skip first frame: $v');
+      },
+      contentPadding: EdgeInsets.zero,
     );
   }
 }

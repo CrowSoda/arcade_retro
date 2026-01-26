@@ -109,8 +109,11 @@ class MultiRxState {
   }
 }
 
-/// Multi-RX state notifier
+/// Multi-RX state notifier with state preservation for RX2 timeout restore
 class MultiRxNotifier extends StateNotifier<MultiRxState> {
+  /// Store RX2's previous state before manual mode (for timeout restore)
+  RxChannelState? _rx2PreviousState;
+  
   MultiRxNotifier() : super(MultiRxState()) {
     // Initialize with simulated 2 RX channels (RX1 scanning, RX2 idle)
     _initializeSimulated();
@@ -118,7 +121,7 @@ class MultiRxNotifier extends StateNotifier<MultiRxState> {
 
   void _initializeSimulated() {
     state = MultiRxState(channels: [
-      // RX1: Always scanning - inference pipeline
+      // RX1: Always scanning - inference pipeline (NEVER interrupted)
       const RxChannelState(
         rxNumber: 1,
         mode: RxMode.scanning,
@@ -126,7 +129,7 @@ class MultiRxNotifier extends StateNotifier<MultiRxState> {
         bandwidthMHz: 20.0,
         isConnected: true,
       ),
-      // RX2: Initially idle - for manual tuning
+      // RX2: Initially idle - for manual tuning/collection
       const RxChannelState(
         rxNumber: 2,
         mode: RxMode.idle,
@@ -156,6 +159,9 @@ class MultiRxNotifier extends StateNotifier<MultiRxState> {
       bandwidthMHz: bwMHz,
       countdownSeconds: timeoutSeconds,
     ));
+    
+    // STUB: Simulate hardware tune
+    _simulateHardwareTune(rxNumber, centerMHz, bwMHz);
   }
 
   /// Set RX to scanning mode
@@ -166,6 +172,9 @@ class MultiRxNotifier extends StateNotifier<MultiRxState> {
       bandwidthMHz: bwMHz,
       countdownSeconds: null,
     ));
+    
+    // STUB: Simulate hardware tune
+    _simulateHardwareTune(rxNumber, centerMHz, bwMHz);
   }
 
   /// Set RX to idle
@@ -181,14 +190,100 @@ class MultiRxNotifier extends StateNotifier<MultiRxState> {
     updateRx(rxNumber, (ch) => ch.copyWith(countdownSeconds: seconds));
   }
 
-  /// Tune RX2 (manual tuning channel)
+  /// Tune RX2 (manual tuning channel) - SAVES previous state for timeout restore
   void tuneRx2(double centerMHz, double bwMHz, int? timeoutSeconds) {
+    // SAVE previous state before switching to manual (for timeout restore)
+    final currentRx2 = state.getRx(2);
+    if (currentRx2 != null && currentRx2.mode != RxMode.manual) {
+      _rx2PreviousState = currentRx2.copyWith();
+      debugPrint('📻 Saved RX2 previous state: ${_rx2PreviousState?.centerFreqMHz} MHz, mode: ${_rx2PreviousState?.mode}');
+    }
+    
     setRxManual(2, centerMHz, bwMHz, timeoutSeconds);
+    debugPrint('📻 RX2 tuned to manual: $centerMHz MHz, BW: $bwMHz MHz, timeout: ${timeoutSeconds ?? "∞"}s');
   }
 
-  /// Resume RX2 to idle after manual mode
+  /// Resume RX2 to SAVED state after manual mode timeout
+  /// If no saved state, falls back to idle
+  void rx2ResumeToSaved() {
+    if (_rx2PreviousState != null) {
+      final prev = _rx2PreviousState!;
+      debugPrint('📻 Restoring RX2 to saved state: ${prev.centerFreqMHz} MHz, mode: ${prev.mode}');
+      
+      if (prev.mode == RxMode.scanning) {
+        setRxScanning(2, prev.centerFreqMHz, prev.bandwidthMHz);
+      } else if (prev.mode == RxMode.idle) {
+        setRxIdle(2);
+      } else {
+        // For other modes, just go to idle
+        setRxIdle(2);
+      }
+      
+      // STUB: Simulate hardware retune
+      _simulateHardwareTune(2, prev.centerFreqMHz, prev.bandwidthMHz);
+      
+      _rx2PreviousState = null;
+    } else {
+      debugPrint('📻 No saved state for RX2, setting to idle');
+      setRxIdle(2);
+    }
+  }
+
+  /// Resume RX2 to idle after manual mode (legacy - use rx2ResumeToSaved for timeout)
   void rx2ResumeIdle() {
-    setRxIdle(2);
+    rx2ResumeToSaved();
+  }
+
+  // =========================================================================
+  // HARDWARE STUBS - Replace with libsidekiq calls in production
+  // =========================================================================
+  
+  /// STUB: Simulate hardware tune command
+  /// In production, this calls libsidekiq API to tune the SDR
+  Future<void> _simulateHardwareTune(int rxNumber, double centerMHz, double bwMHz) async {
+    debugPrint('📻 [STUB] Hardware tune RX$rxNumber -> $centerMHz MHz, BW: $bwMHz MHz');
+    
+    // Simulate tune time (real hardware takes 10-50ms)
+    await Future.delayed(const Duration(milliseconds: 50));
+    
+    // TODO: Production implementation with libsidekiq:
+    // try {
+    //   await _sidekiqApi.tuneRx(
+    //     rxNumber: rxNumber,
+    //     centerFreqHz: (centerMHz * 1e6).toInt(),
+    //     bandwidthHz: (bwMHz * 1e6).toInt(),
+    //   );
+    //   debugPrint('📻 Hardware tune RX$rxNumber complete');
+    // } catch (e) {
+    //   debugPrint('📻 Hardware tune RX$rxNumber FAILED: $e');
+    //   updateRx(rxNumber, (ch) => ch.copyWith(
+    //     mode: RxMode.error,
+    //     errorMessage: 'Tune failed: $e',
+    //   ));
+    // }
+    
+    debugPrint('📻 [STUB] Hardware tune complete');
+  }
+
+  /// STUB: Get hardware status
+  /// In production, this queries libsidekiq for actual RX status
+  Future<Map<String, dynamic>> getHardwareStatus(int rxNumber) async {
+    debugPrint('📻 [STUB] Getting hardware status for RX$rxNumber');
+    
+    // TODO: Production implementation:
+    // return await _sidekiqApi.getRxStatus(rxNumber);
+    
+    // Return simulated status
+    final rx = state.getRx(rxNumber);
+    return {
+      'rxNumber': rxNumber,
+      'connected': rx?.isConnected ?? false,
+      'centerFreqHz': ((rx?.centerFreqMHz ?? 0) * 1e6).toInt(),
+      'bandwidthHz': ((rx?.bandwidthMHz ?? 0) * 1e6).toInt(),
+      'temperature': 42.5,
+      'rssi': -45.0,
+      'stub': true,
+    };
   }
 
   /// Add a new RX channel (for hardware that supports more)

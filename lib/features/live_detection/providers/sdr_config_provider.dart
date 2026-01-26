@@ -533,15 +533,32 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
     }
   }
 
-  /// Cancel drawing (doesn't affect current capture)
+  /// Cancel drawing - FULLY reset drawing state including any saved box
+  /// This ensures canceling from duration dialog doesn't leave stale box data
   void cancelDrawing() {
-    state = state.copyWith(
+    // Use explicit new state to ensure all pending fields are null (not preserved by copyWith)
+    state = ManualCaptureState(
+      // Preserve capture state if a capture is in progress
+      phase: state.phase,
+      boxX1: state.boxX1,
+      boxY1: state.boxY1,
+      boxX2: state.boxX2,
+      boxY2: state.boxY2,
+      signalName: state.signalName,
+      captureDurationMinutes: state.captureDurationMinutes,
+      captureProgress: state.captureProgress,
+      targetFreqMHz: state.targetFreqMHz,
+      queue: state.queue,
+      // FULLY CLEAR drawing state
       isDrawing: false,
       pendingBoxX1: null,
       pendingBoxY1: null,
       pendingBoxX2: null,
       pendingBoxY2: null,
+      pendingFreqMHz: null,
+      pendingDuration: 1,
     );
+    debugPrint('📐 Drawing cancelled and cleared');
   }
 
   /// Cancel current capture and clear queue

@@ -28,6 +28,7 @@ class BackendLauncherState {
   final int? pid;
   final int grpcPort;
   final int? wsPort; // WebSocket port (discovered from server stdout)
+  final String? version; // Backend version (parsed from server stdout)
   final List<String> logs;
 
   const BackendLauncherState({
@@ -36,6 +37,7 @@ class BackendLauncherState {
     this.pid,
     this.grpcPort = 50051,
     this.wsPort,
+    this.version,
     this.logs = const [],
   });
 
@@ -50,6 +52,7 @@ class BackendLauncherState {
     int? pid,
     int? grpcPort,
     int? wsPort,
+    String? version,
     List<String>? logs,
   }) {
     return BackendLauncherState(
@@ -58,6 +61,7 @@ class BackendLauncherState {
       pid: pid ?? this.pid,
       grpcPort: grpcPort ?? this.grpcPort,
       wsPort: wsPort ?? this.wsPort,
+      version: version ?? this.version,
       logs: logs ?? this.logs,
     );
   }

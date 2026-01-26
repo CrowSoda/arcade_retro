@@ -665,6 +665,43 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     }
   }
 
+  /// Set dB range for waterfall display normalization
+  /// minDb: noise floor (e.g., -100)
+  /// maxDb: peak level (e.g., -20)
+  void setDbRange(double minDb, double maxDb) {
+    debugPrint('[VideoStream] setDbRange: $minDb to $maxDb dB');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot set dB range - not connected');
+      return;
+    }
+    
+    final msg = json.encode({
+      'command': 'set_db_range',
+      'min_db': minDb,
+      'max_db': maxDb,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent dB range command: $minDb to $maxDb dB');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
+  }
+
+  // Track if first frame should be skipped
+  bool _skipFirstFrame = false;
+  bool _firstFrameReceived = false;
+
+  /// Set whether to skip the first waterfall frame on connection
+  /// Useful to avoid garbage/initialization data
+  void setSkipFirstFrame(bool skip) {
+    debugPrint('[VideoStream] setSkipFirstFrame: $skip');
+    _skipFirstFrame = skip;
+    _firstFrameReceived = false;  // Reset on setting change
+  }
+
   @override
   void dispose() {
     disconnect();

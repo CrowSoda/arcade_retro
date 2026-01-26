@@ -884,6 +884,26 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
   
   static const _durations = [1, 2, 5, 10];  // minutes
 
+  /// Calculate center frequency from the drawn box, not the current view
+  double get boxCenterFreqMHz {
+    final captureState = ref.read(manualCaptureProvider);
+    final sdrConfig = ref.read(sdrConfigProvider);
+    
+    if (!captureState.hasPendingBox) return widget.centerFreqMHz;
+    
+    // Box X positions are normalized 0-1 representing the frequency axis
+    // x1 = left edge, x2 = right edge (may be swapped if drawn right-to-left)
+    final x1 = captureState.pendingBoxX1!;
+    final x2 = captureState.pendingBoxX2!;
+    final boxCenterNorm = (x1 + x2) / 2;
+    
+    // Convert to frequency: left = centerFreq - BW/2, right = centerFreq + BW/2
+    final lowFreq = sdrConfig.centerFreqMHz - sdrConfig.bandwidthMHz / 2;
+    final boxCenterFreq = lowFreq + (boxCenterNorm * sdrConfig.bandwidthMHz);
+    
+    return boxCenterFreq;
+  }
+
   @override
   Widget build(BuildContext context) {
     final captureState = ref.watch(manualCaptureProvider);
@@ -910,9 +930,9 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Frequency info
+          // Frequency info - FIXED: Use calculated box center freq instead of view CF
           Text(
-            'Center Freq: ${widget.centerFreqMHz.toStringAsFixed(2)} MHz',
+            'Center Freq: ${boxCenterFreqMHz.toStringAsFixed(2)} MHz',
             style: const TextStyle(fontSize: 12, color: G20Colors.textSecondaryDark),
           ),
           const SizedBox(height: 16),
@@ -950,9 +970,10 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
         TextButton(
           onPressed: () {
             Navigator.pop(context);
-            // Go back to drawing mode (don't cancel it)
+            // FIXED: Cancel drawing mode and clear pending box completely
+            ref.read(manualCaptureProvider.notifier).cancelDrawing();
           },
-          child: const Text('Back', style: TextStyle(color: G20Colors.textSecondaryDark)),
+          child: const Text('Cancel', style: TextStyle(color: G20Colors.textSecondaryDark)),
         ),
         ElevatedButton(
           onPressed: () => _startCapture(context),
