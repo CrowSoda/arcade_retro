@@ -87,6 +87,14 @@ class _FadingToastState extends State<_FadingToast> with SingleTickerProviderSta
 void showFadingToast(BuildContext context, String message, {IconData icon = Icons.check_circle, Color color = Colors.green}) {
   final overlay = Overlay.of(context);
   late OverlayEntry entry;
+  bool isRemoved = false;
+  
+  void safeRemove() {
+    if (!isRemoved) {
+      isRemoved = true;
+      entry.remove();
+    }
+  }
   
   entry = OverlayEntry(
     builder: (context) => Positioned(
@@ -100,7 +108,7 @@ void showFadingToast(BuildContext context, String message, {IconData icon = Icon
             message: message,
             icon: icon,
             color: color.withOpacity(0.9),
-            onComplete: () => entry.remove(),
+            onComplete: safeRemove,
           ),
         ),
       ),
@@ -108,6 +116,9 @@ void showFadingToast(BuildContext context, String message, {IconData icon = Icon
   );
   
   overlay.insert(entry);
+  
+  // Safety fallback: ensure removal after max duration even if animation fails
+  Future.delayed(const Duration(seconds: 5), safeRemove);
 }
 
 /// Show capture warning dialog - returns true if user confirms, false if cancelled
@@ -277,18 +288,18 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
       centerMHz: centerMHz,
       bwMHz: bwMHz,
     );
-    debugPrint('📻 Tuned to ${centerMHz.toStringAsFixed(1)} MHz');
+    debugPrint('[Tuning] Tuned to ${centerMHz.toStringAsFixed(1)} MHz');
   }
 
   void _handleTimeoutSelect(int? timeout) async {
     setState(() => _selectedTimeout = timeout);
     await ref.read(tuningStateProvider.notifier).setManualMode(timeout);
-    debugPrint('⏱️ Manual mode: ${timeout != null ? "${timeout}s timeout" : "permanent"}');
+    debugPrint('[Tuning] Manual mode: ${timeout != null ? "${timeout}s timeout" : "permanent"}');
   }
 
   void _handleResumeAuto() async {
     await ref.read(tuningStateProvider.notifier).resumeAuto();
-    debugPrint('🤖 Auto scan resumed');
+    debugPrint('[Tuning] Auto scan resumed');
   }
 
   @override

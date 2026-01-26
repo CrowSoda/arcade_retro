@@ -237,21 +237,21 @@ class _DetectionTableWithLongPress extends ConsumerWidget {
         // Zoom map to show all detections
         final detections = ref.read(detectionProvider);
         if (detections.isEmpty) {
-          debugPrint('No detections to show');
+          debugPrint('[Map] No detections to show');
           return;
         }
         
-        // Calculate bounds that fit all detections
-        final mapState = ref.read(mapStateProvider);
+        // Calculate bounds that fit all detections and switch to map view
+        final currentMode = ref.read(mapStateProvider).displayMode;
         ref.read(mapStateProvider.notifier).zoomToFitAllDetections(detections);
         
         // Switch to map view if not already
-        if (mapState.displayMode != DisplayMode.map) {
+        if (currentMode != DisplayMode.map) {
           ref.read(mapStateProvider.notifier).setDisplayMode(DisplayMode.map);
           ref.read(waterfallProvider.notifier).skipRendering();
         }
         
-        debugPrint('🗺️ Showing ${detections.length} detections on map');
+        debugPrint('[Map] Showing ${detections.length} detections on map');
       },
       child: const DetectionTable(),
     );

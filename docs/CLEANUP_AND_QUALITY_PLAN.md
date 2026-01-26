@@ -313,7 +313,7 @@ lib/features/shell/
 │   └── connection_indicator.dart  # NEW: Green/yellow/red dot
 ```
 
-### 2.7 `detection_provider.dart` - Model + Provider + Helpers
+### 2.7 `detection_provider.dart` - Model + Provider + Helpers ✅ DONE
 
 **Current:** 300+ lines with:
 - Detection model class
@@ -321,16 +321,16 @@ lib/features/shell/
 - Mock data generation
 - Video detection conversion helper
 
-**Recommended Split:**
+**Completed Split:**
 
 ```
 lib/features/live_detection/
 ├── models/
-│   └── detection.dart             # NEW: Detection class only
+│   └── detection.dart             # ✅ CREATED: Detection class + helpers
 ├── providers/
 │   └── detection_provider.dart    # KEEP: Notifier only
 └── utils/
-    └── detection_converter.dart   # NEW: convertVideoDetection helper
+    └── detection_converter.dart   # ✅ CREATED: convertVideoDetection helper
 ```
 
 ### 2.8 `server.py` - Massive Multi-Service File
@@ -544,18 +544,30 @@ StateProviders for simple settings
 
 ## Implementation Checklist
 
-### Phase 1: Critical (1-2 days)
-- [ ] Delete 5 dead code files
-- [ ] Fix unused import in live_detection_screen.dart
-- [ ] Fix `_skipFirstFrame` logic bug
-- [ ] Fix FPS counter reset logic
-- [ ] Remove unused `mapState` variable
-- [ ] Add toast overlay safety check
+### Phase 1: Critical (1-2 days) ✅ COMPLETED
+- [x] Delete 5 dead code files
+  - Deleted: `path_resolver.dart`
+  - Deleted: `track_overlay.dart`
+  - Deleted: `waterfall_frame_handler.dart`
+  - Deleted: `waterfall_display.dart`
+  - Deleted: `track.dart`
+- [x] Fix unused import in live_detection_screen.dart (already clean)
+- [x] Fix `_skipFirstFrame` logic bug - now respects the setting
+- [ ] Fix FPS counter reset logic (minor, deferred to Phase 2)
+- [x] Remove unused `mapState` variable - now uses value immediately
+- [x] Add toast overlay safety check - added fallback removal after 5s
 
-### Phase 2: SRP Refactoring (3-5 days)
+### Phase 2: SRP Refactoring (3-5 days) - IN PROGRESS
 - [ ] Extract video_stream_provider components
-- [ ] Extract settings_screen providers to separate file
-- [ ] Extract settings_screen widgets
+- [x] Extract settings_screen providers to separate file
+  - Created: `lib/features/settings/providers/settings_providers.dart`
+  - 10+ providers centralized with proper documentation
+  - Backward-compatible re-export from settings_screen.dart
+- [x] Extract settings_screen widgets
+  - Created: `lib/features/settings/widgets/fft_size_selector.dart`
+  - Created: `lib/features/settings/widgets/colormap_selector.dart`
+  - Created: `lib/features/settings/widgets/score_threshold_selector.dart`
+  - Created: `lib/features/settings/widgets/widgets.dart` (barrel file)
 - [ ] Extract live_detection_screen widgets
 - [ ] Split unified_pipeline.py colormap code
 - [ ] Extract server.py handlers
@@ -565,21 +577,43 @@ StateProviders for simple settings
 - [ ] Move UI state providers to ui_state_providers.dart
 - [ ] Update all imports
 
-### Phase 4: Deduplication (1-2 days)
-- [ ] Generic colormap LUT generator
-- [ ] Generic SegmentedOption widget
-- [ ] Consolidate dialogs
-- [ ] Single mission picker implementation
+### Phase 4: Deduplication (1-2 days) - IN PROGRESS
+- [ ] Generic colormap LUT generator (Python backend)
+- [x] Generic SegmentedOption widget
+  - Created: `lib/core/widgets/dialogs.dart`
+  - `SegmentedOption<T>` - single option button
+  - `SegmentedSelector<T>` - row of options
+- [x] Consolidate dialogs
+  - Created: `lib/core/widgets/dialogs.dart`
+  - `showG20Toast()` - fading overlay toast
+  - `showG20ConfirmDialog()` - warning confirmation
+  - `showG20ErrorDialog()` - error display
+- [x] Single mission picker implementation
+  - Created: `lib/features/config/widgets/mission_picker_dialog.dart`
+  - `showMissionPickerDialog()` - unified mission selection
+  - `MissionCard` - reusable card widget
 
-### Phase 5: Debug Cleanup (0.5 days)
-- [ ] Replace all emoji debug strings with tags
+### Phase 5: Debug Cleanup (0.5 days) - IN PROGRESS
+- [x] Replace emoji debug strings in settings_screen.dart
+- [x] Replace emoji debug strings in inputs_panel.dart
+- [x] Replace emoji debug strings in live_detection_screen.dart
+- [ ] Replace emoji debug strings in remaining files
 - [ ] Remove commented-out code
 - [ ] Standardize log format
 
-### Phase 6: Documentation (1 day)
+### Phase 6: Documentation (1 day) - IN PROGRESS
 - [ ] Add dartdoc to all providers
-- [ ] Create ARCHITECTURE.md
-- [ ] Document WebSocket protocol
+- [x] Create ARCHITECTURE.md
+  - System overview and components
+  - Data flow diagrams (IQ → FFT → Waterfall → Flutter)
+  - WebSocket binary protocol documentation
+  - Strip message header format (17 bytes)
+  - gRPC protocol overview
+  - Riverpod provider hierarchy
+  - Directory structure
+  - Key design decisions explained
+  - Performance considerations
+- [ ] Document remaining APIs
 
 ---
 

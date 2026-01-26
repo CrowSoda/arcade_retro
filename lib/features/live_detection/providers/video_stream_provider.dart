@@ -383,12 +383,13 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     // PERF TIMING: Measure strip handling time
     final stopwatch = Stopwatch()..start();
     
-    // ALWAYS skip first frame to avoid garbage/initialization data
-    if (!_firstFrameReceived) {
+    // Skip first frame if setting is enabled (avoids garbage/initialization data)
+    if (_skipFirstFrame && !_firstFrameReceived) {
       _firstFrameReceived = true;
-      debugPrint('[VideoStream] Skipping first frame (always skip on connect)');
+      debugPrint('[VideoStream] Skipping first frame per skip setting');
       return;
     }
+    _firstFrameReceived = true;  // Mark as received either way
     
     // Parse binary header (17 bytes):
     // - frame_id: uint32 (4 bytes)
@@ -449,18 +450,18 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       _initPixelBuffer(stripWidth, state.metadata?.suggestedBufferHeight ?? 5700);
     }
     
-    // Calculate FPS
+    // Calculate FPS with rolling window
     final now = DateTime.now();
+    _fpsFrameCount++;
     if (_lastFrameTime != null) {
-      _fpsFrameCount++;
       final elapsed = now.difference(_lastFrameTime!).inMilliseconds;
       if (elapsed >= 1000) {
         _measuredFps = _fpsFrameCount * 1000.0 / elapsed;
         _fpsFrameCount = 0;
-        _lastFrameTime = now;
+        _lastFrameTime = now;  // Reset timer after measurement
       }
     } else {
-      _lastFrameTime = now;
+      _lastFrameTime = now;  // Initialize on first frame
     }
     
     // SCROLL: Move buffer up by rowsInStrip rows

@@ -38,11 +38,11 @@ class _AppShellState extends ConsumerState<AppShell> {
         // Capture started - update RX-2 to manual mode with capture frequency
         final freqMHz = double.tryParse(next.targetFreqMHz ?? '825.0') ?? 825.0;
         multiRxNotifier.tuneRx2(freqMHz, 5.0, null);  // 5 MHz BW, no timeout
-        debugPrint('📡 RX-2 tuned to $freqMHz MHz for capture');
+        debugPrint('[RX] RX-2 tuned to $freqMHz MHz for capture');
       } else if (next.phase == CapturePhase.idle && prev?.phase != CapturePhase.idle) {
         // Capture complete - return RX-2 to idle
         multiRxNotifier.rx2ResumeIdle();
-        debugPrint('📡 RX-2 returned to idle');
+        debugPrint('[RX] RX-2 returned to idle');
       }
     });
     
@@ -204,7 +204,7 @@ class _RecordingIndicatorState extends ConsumerState<_RecordingIndicator>
     final totalSec = durationMin * 60;
 
     return Tooltip(
-      message: '🔴 RECORDING\n$signalName\n${_formatTime(elapsedSec)} / ${_formatTime(totalSec)}\n\nTap to cancel',
+      message: '[REC] RECORDING\n$signalName\n${_formatTime(elapsedSec)} / ${_formatTime(totalSec)}\n\nTap to cancel',
       waitDuration: const Duration(milliseconds: 300),
       preferBelow: false,
       child: GestureDetector(
