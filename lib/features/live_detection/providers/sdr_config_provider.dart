@@ -405,17 +405,30 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
   /// Start drawing mode - ALWAYS works regardless of capturing state
   /// Uses SEPARATE pending box fields so current capture continues
   void startDrawingMode(String targetFreqMHz, {int durationMinutes = 1}) {
-    // Use copyWith to PRESERVE capture state while enabling drawing
-    state = state.copyWith(
+    // FIXED: Use explicit new state to ensure pending box is cleared
+    // (copyWith with null values doesn't clear - it preserves old values!)
+    state = ManualCaptureState(
+      // Preserve capture state if a capture is in progress
+      phase: state.phase,
+      boxX1: state.boxX1,
+      boxY1: state.boxY1,
+      boxX2: state.boxX2,
+      boxY2: state.boxY2,
+      signalName: state.signalName,
+      captureDurationMinutes: state.captureDurationMinutes,
+      captureProgress: state.captureProgress,
+      targetFreqMHz: state.targetFreqMHz,
+      queue: state.queue,
+      // EXPLICITLY SET drawing state (clears any previous pending box)
       isDrawing: true,
-      pendingBoxX1: null,  // Reset pending box
+      pendingBoxX1: null,
       pendingBoxY1: null,
       pendingBoxX2: null,
       pendingBoxY2: null,
       pendingFreqMHz: targetFreqMHz,
       pendingDuration: durationMinutes,
     );
-    debugPrint('📐 Drawing mode started @ $targetFreqMHz MHz (capturing: ${state.isCapturing})');
+    debugPrint('[Manual Capture] Drawing mode started @ $targetFreqMHz MHz (capturing: ${state.isCapturing})');
   }
 
   /// User started drawing box (pending)

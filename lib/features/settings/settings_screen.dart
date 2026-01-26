@@ -55,6 +55,13 @@ final waterfallTimeSpanProvider = StateProvider<double>((ref) => 2.5);
 /// Default 30fps - full speed
 final waterfallFpsProvider = StateProvider<int>((ref) => 30);
 
+/// Colormap setting for waterfall display
+/// 0=Viridis, 1=Plasma, 2=Inferno, 3=Magma, 4=Turbo
+final waterfallColormapProvider = StateProvider<int>((ref) => 0);
+
+/// Colormap names for display
+const List<String> colormapNames = ['Viridis', 'Plasma', 'Inferno', 'Magma', 'Turbo'];
+
 /// Settings Screen - Configuration and connection settings
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -158,64 +165,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               // FFT Size Selector - GPU-accelerated FFT resolution control
               const _FftSizeSelector(),
               const SizedBox(height: 16),
-              // dB Range selectors - wired to providers
-              const _DbRangeSelector(),
-              const SizedBox(height: 16),
-              // Skip first frame toggle
-              const _SkipFirstFrameToggle(),
-              const SizedBox(height: 12),
-              _buildDropdown(
-                label: 'Colormap',
-                value: _colormap,
-                items: const [
-                  'Viridis',
-                  'Plasma',
-                  'Inferno',
-                  'Grayscale',
-                ],
-                onChanged: (v) => setState(() => _colormap = v ?? 0),
-              ),
+              // Colormap selector - wired to provider and backend
+              const _ColormapSelector(),
             ],
           ),
           const SizedBox(height: 24),
-          // Tuning Settings
-          _buildSection(
-            title: 'Tuning',
-            icon: Icons.tune,
-            children: [
-              _AutoTuneDelaySelector(),
-            ],
-          ),
-          const SizedBox(height: 24),
-          // Model Settings
+          // Model Settings - just threshold, model info moved to Mission
           _buildSection(
             title: 'Model',
             icon: Icons.model_training,
             children: [
               const _ScoreThresholdSelector(),
-              const SizedBox(height: 16),
-              const Divider(),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Active Model'),
-                subtitle: const Text('modern_burst_gap_fold3.pth'),
-                trailing: TextButton(
-                  onPressed: () {
-                    // TODO: Open model selector
-                  },
-                  child: const Text('Change'),
-                ),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Model Hash'),
-                subtitle: const Text('a1b2c3d4e5f6...'),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Classes'),
-                subtitle: const Text('6 classes trained'),
-              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -1359,6 +1319,86 @@ class _DbRangeSelector extends ConsumerWidget {
               ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Colormap selector - changes waterfall color palette
+/// Sends command to backend which switches the LUT
+class _ColormapSelector extends ConsumerWidget {
+  const _ColormapSelector();
+
+  void _setColormap(WidgetRef ref, int newColormap) {
+    debugPrint('[Settings] Colormap changed: ${colormapNames[newColormap]}');
+    
+    // Update provider state
+    ref.read(waterfallColormapProvider.notifier).state = newColormap;
+    
+    // Send to backend
+    ref.read(videoStreamProvider.notifier).setColormap(newColormap);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colormap = ref.watch(waterfallColormapProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Colormap',
+          style: TextStyle(
+            fontSize: 14,
+            color: G20Colors.textPrimaryDark,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Color palette for waterfall display',
+          style: TextStyle(
+            fontSize: 11,
+            color: G20Colors.textSecondaryDark,
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Colormap buttons in a row
+        Row(
+          children: List.generate(colormapNames.length, (i) {
+            final isSelected = colormap == i;
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: i < colormapNames.length - 1 ? 6 : 0),
+                child: GestureDetector(
+                  onTap: () => _setColormap(ref, i),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected 
+                          ? G20Colors.primary.withValues(alpha: 0.2) 
+                          : G20Colors.cardDark,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: isSelected ? G20Colors.primary : G20Colors.cardDark,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        colormapNames[i],
+                        style: TextStyle(
+                          color: isSelected ? G20Colors.primary : G20Colors.textSecondaryDark,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
         ),
       ],
     );

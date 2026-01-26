@@ -9,7 +9,8 @@ import '../providers/rx_state_provider.dart';
 import '../providers/scanner_provider.dart';
 import '../../config/providers/tuning_state_provider.dart';
 import '../../config/config_screen.dart' show missionsProvider, activeMissionProvider, Mission;
-import '../../settings/settings_screen.dart' show autoTuneDelayProvider;
+import '../../settings/settings_screen.dart' show autoTuneDelayProvider, waterfallMinDbProvider, waterfallMaxDbProvider;
+import '../providers/video_stream_provider.dart';
 
 /// Fading toast overlay - disappears after duration
 class _FadingToast extends StatefulWidget {
@@ -305,183 +306,121 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
     }
 
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header with mode indicator
+          // Header with mode indicator - compact
           Row(
             children: [
-              const Text(
-                'Mission',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: G20Colors.textPrimaryDark,
-                ),
-              ),
+              const Text('Mission', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: G20Colors.textPrimaryDark)),
               const Spacer(),
-              // Mode indicator
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isManual 
-                      ? G20Colors.warning.withValues(alpha: 0.2) 
-                      : G20Colors.success.withValues(alpha: 0.2),
+                  color: isManual ? G20Colors.warning.withValues(alpha: 0.2) : G20Colors.success.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   tuningState.modeDisplayString,
-                  style: TextStyle(
-                    color: isManual ? G20Colors.warning : G20Colors.success,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(color: isManual ? G20Colors.warning : G20Colors.success, fontSize: 9, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           
-          // Active config display
+          // Active config - more compact
           Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: G20Colors.cardDark,
-              borderRadius: BorderRadius.circular(6),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(color: G20Colors.cardDark, borderRadius: BorderRadius.circular(4)),
             child: Row(
               children: [
-                Icon(
-                  activeMission != null ? Icons.check_circle : Icons.warning_amber,
-                  size: 14,
-                  color: activeMission != null ? G20Colors.success : G20Colors.warning,
-                ),
-                const SizedBox(width: 8),
+                Icon(activeMission != null ? Icons.check_circle : Icons.warning_amber, size: 12, color: activeMission != null ? G20Colors.success : G20Colors.warning),
+                const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
-                    activeMission?.name ?? 'No config loaded',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: activeMission != null ? G20Colors.textPrimaryDark : G20Colors.textSecondaryDark,
-                    ),
-                  ),
+                  child: Text(activeMission?.name ?? 'No config', style: TextStyle(fontSize: 10, color: activeMission != null ? G20Colors.textPrimaryDark : G20Colors.textSecondaryDark), overflow: TextOverflow.ellipsis),
                 ),
-                // Load Mission button - touch-friendly (48x48)
                 Material(
                   color: G20Colors.primary,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(4),
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(4),
                     onTap: () => _loadConfig(context, ref),
-                    child: const SizedBox(
-                      width: 48,
-                      height: 32,
-                      child: Icon(Icons.rocket_launch, size: 18, color: Colors.white),
-                    ),
+                    child: const SizedBox(width: 32, height: 24, child: Icon(Icons.rocket_launch, size: 14, color: Colors.white)),
                   ),
                 ),
               ],
             ),
           ),
           
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           
-          // Frequency + BW inputs
+          // Frequency + BW - compact
           Row(
             children: [
-              // Center Frequency
-              Expanded(
-                child: _EditableField(
-                  label: 'Center (MHz)',
-                  controller: _freqController,
-                  onSubmit: (_) => _handleGo(),
-                  onChanged: _onFrequencyChanged,
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Bandwidth dropdown
-              Expanded(
-                child: _BandwidthDropdown(
-                  value: sdrConfig.bandwidthMHz,
-                  onChanged: (bw) {
-                    ref.read(sdrConfigProvider.notifier).setBandwidth(bw);
-                    ref.read(waterfallProvider.notifier).setBandwidth(bw);
-                  },
-                ),
-              ),
+              Expanded(child: _EditableField(label: 'Center (MHz)', controller: _freqController, onSubmit: (_) => _handleGo(), onChanged: _onFrequencyChanged)),
+              const SizedBox(width: 6),
+              Expanded(child: _BandwidthDropdown(value: sdrConfig.bandwidthMHz, onChanged: (bw) { ref.read(sdrConfigProvider.notifier).setBandwidth(bw); ref.read(waterfallProvider.notifier).setBandwidth(bw); })),
             ],
           ),
           
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           
-          // Timeout buttons row
+          // Timeout row - compact
           Row(
             children: [
-              const Text('Timeout:', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
-              const SizedBox(width: 6),
+              const Text('Timeout:', style: TextStyle(fontSize: 8, color: G20Colors.textSecondaryDark)),
+              const SizedBox(width: 4),
               _TimeoutButton(label: '60s', isSelected: _selectedTimeout == 60 && isManual, onTap: () => _handleTimeoutSelect(60)),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               _TimeoutButton(label: '120s', isSelected: _selectedTimeout == 120 && isManual, onTap: () => _handleTimeoutSelect(120)),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               _TimeoutButton(label: '300s', isSelected: _selectedTimeout == 300 && isManual, onTap: () => _handleTimeoutSelect(300)),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               _TimeoutButton(label: '∞', isSelected: _selectedTimeout == null && isManual, onTap: () => _handleTimeoutSelect(null)),
             ],
           ),
           
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           
-          // GO button - full width
+          // GO button - smaller
           SizedBox(
-            height: 40,
+            height: 32,
             child: ElevatedButton(
               onPressed: tuningState.isTuning ? null : _handleGo,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: G20Colors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: G20Colors.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)), padding: EdgeInsets.zero),
               child: tuningState.isTuning
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('GO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('GO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             ),
           ),
           
-          // Resume Auto button (only when in manual mode)
+          // Resume Auto - compact
           if (isManual) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             SizedBox(
-              height: 36,
+              height: 28,
               child: OutlinedButton.icon(
                 onPressed: _handleResumeAuto,
-                icon: const Icon(Icons.autorenew, size: 16),
-                label: const Text('Resume Auto Scan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: G20Colors.success,
-                  side: const BorderSide(color: G20Colors.success),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                ),
+                icon: const Icon(Icons.autorenew, size: 12),
+                label: const Text('Resume Auto', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9)),
+                style: OutlinedButton.styleFrom(foregroundColor: G20Colors.success, side: const BorderSide(color: G20Colors.success), padding: const EdgeInsets.symmetric(horizontal: 6), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))),
               ),
             ),
           ],
           
-          // Error message if any
+          // Error
           if (sdrConfig.errorMessage != null || tuningState.errorMessage != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              sdrConfig.errorMessage ?? tuningState.errorMessage ?? '',
-              style: const TextStyle(fontSize: 9, color: G20Colors.error),
-            ),
+            const SizedBox(height: 4),
+            Text(sdrConfig.errorMessage ?? tuningState.errorMessage ?? '', style: const TextStyle(fontSize: 8, color: G20Colors.error)),
           ],
+          
+          // Dynamic Range slider - use Expanded to fill remaining space
+          const SizedBox(height: 6),
+          const Divider(color: G20Colors.cardDark, height: 1),
+          const SizedBox(height: 6),
+          const Expanded(child: _DbRangeSliders()),
         ],
       ),
     );
@@ -815,6 +754,90 @@ class _TimeoutButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Provider for dynamic range
+final waterfallDynamicRangeProvider = StateProvider<double>((ref) => 60.0);
+
+/// Simple contrast slider - controls dynamic range only
+/// Backend auto-tracks noise floor, this just adjusts display contrast
+class _DbRangeSliders extends ConsumerWidget {
+  const _DbRangeSliders();
+
+  void _setDynamicRange(WidgetRef ref, double range) {
+    ref.read(waterfallDynamicRangeProvider.notifier).state = range;
+    
+    // Send only dynamic range to backend (backend keeps its own noise floor tracking)
+    // We send as min/max but backend extracts just the range
+    ref.read(videoStreamProvider.notifier).setDbRange(-100, -100 + range);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dynamicRange = ref.watch(waterfallDynamicRangeProvider);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header with current value
+        Row(
+          children: [
+            const Icon(Icons.tune, size: 12, color: G20Colors.textSecondaryDark),
+            const SizedBox(width: 4),
+            const Text(
+              'Dynamic Range',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: G20Colors.textPrimaryDark),
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: G20Colors.primary.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${dynamicRange.toStringAsFixed(0)} dB',
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: G20Colors.primary),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        
+        // Simple slider
+        SliderTheme(
+          data: SliderThemeData(
+            trackHeight: 4,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            activeTrackColor: G20Colors.primary,
+            inactiveTrackColor: G20Colors.cardDark,
+            thumbColor: G20Colors.primary,
+            overlayColor: G20Colors.primary.withValues(alpha: 0.2),
+          ),
+          child: Slider(
+            value: dynamicRange.clamp(30, 100),
+            min: 30,
+            max: 100,
+            divisions: 14,  // 5 dB steps
+            onChanged: (v) => _setDynamicRange(ref, v),
+          ),
+        ),
+        
+        // Min/Max labels
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('High', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
+              Text('Low', style: TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

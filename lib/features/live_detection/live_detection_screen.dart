@@ -8,7 +8,6 @@ import 'providers/inference_provider.dart';
 import 'providers/video_stream_provider.dart';
 import '../settings/settings_screen.dart' show waterfallFpsProvider;
 import '../config/config_screen.dart' show missionsProvider, activeMissionProvider, Mission;
-import 'widgets/waterfall_display.dart';
 import 'widgets/video_waterfall_display.dart';
 import 'widgets/psd_chart.dart';
 import 'widgets/detection_table.dart';

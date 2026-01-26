@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/config/router.dart';
 import '../../core/config/theme.dart';
+import '../../core/services/backend_launcher.dart';
 import '../config/providers/tuning_state_provider.dart';
 import '../live_detection/providers/sdr_config_provider.dart';
 import '../live_detection/providers/rx_state_provider.dart';
+import '../live_detection/providers/video_stream_provider.dart';
 
 /// Fixed color for recording indicator - cyan, neutral and visible
 const _recordingColor = Color(0xFF00BCD4);
@@ -451,25 +453,37 @@ class _SingleRxCard extends StatelessWidget {
   }
 }
 
-/// Connection status indicator
-class _ConnectionIndicator extends StatelessWidget {
+/// Connection status indicator - wired to backend and video stream state
+class _ConnectionIndicator extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
-    // TODO: Wire up to actual connection state
-    const isConnected = false;
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Check both backend launcher and video stream connection
+    final backendState = ref.watch(backendLauncherProvider);
+    final videoState = ref.watch(videoStreamProvider);
+    
+    // Connected if backend is running (has wsPort) AND video stream is connected
+    final isConnected = backendState.wsPort != null && videoState.isConnected;
+    final isPartial = backendState.wsPort != null && !videoState.isConnected;
+
+    final color = isConnected ? G20Colors.success 
+        : isPartial ? G20Colors.warning 
+        : G20Colors.error;
+    
+    final message = isConnected ? 'Connected to backend' 
+        : isPartial ? 'Backend running, stream disconnected'
+        : 'Disconnected';
 
     return Tooltip(
-      message: isConnected ? 'Connected to G20' : 'Disconnected',
+      message: message,
       child: Container(
         width: 12,
         height: 12,
         decoration: BoxDecoration(
-          color: isConnected ? G20Colors.success : G20Colors.error,
+          color: color,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: (isConnected ? G20Colors.success : G20Colors.error)
-                  .withOpacity(0.5),
+              color: color.withOpacity(0.5),
               blurRadius: 4,
               spreadRadius: 1,
             ),

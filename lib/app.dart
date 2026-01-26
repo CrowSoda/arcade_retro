@@ -91,9 +91,11 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
       themeMode: ThemeMode.dark, // Default to dark theme for RF visualization
       routerConfig: router,
       builder: (context, child) {
+        Widget content = child ?? const SizedBox();
+        
         // Show backend status banner if not running
         if (backendState.state == BackendState.error) {
-          return Column(
+          content = Column(
             children: [
               MaterialBanner(
                 backgroundColor: Colors.red.shade900,
@@ -110,11 +112,21 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
                   ),
                 ],
               ),
-              Expanded(child: child ?? const SizedBox()),
+              Expanded(child: content),
             ],
           );
         }
-        return child ?? const SizedBox();
+        
+        // Enforce 16:9 aspect ratio with black letterboxing
+        return Container(
+          color: Colors.black,  // Letterbox color
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: content,
+            ),
+          ),
+        );
       },
     );
   }

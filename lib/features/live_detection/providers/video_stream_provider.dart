@@ -326,6 +326,9 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
         onDone: _onDone,
       );
 
+      // Reset first frame flag on connect
+      _firstFrameReceived = false;
+
       state = state.copyWith(isConnected: true, isConnecting: false);
       debugPrint('[VideoStream] Connected!');
     } catch (e) {
@@ -379,6 +382,13 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   void _handleStrip(Uint8List data) {
     // PERF TIMING: Measure strip handling time
     final stopwatch = Stopwatch()..start();
+    
+    // ALWAYS skip first frame to avoid garbage/initialization data
+    if (!_firstFrameReceived) {
+      _firstFrameReceived = true;
+      debugPrint('[VideoStream] Skipping first frame (always skip on connect)');
+      return;
+    }
     
     // Parse binary header (17 bytes):
     // - frame_id: uint32 (4 bytes)
@@ -700,6 +710,32 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     debugPrint('[VideoStream] setSkipFirstFrame: $skip');
     _skipFirstFrame = skip;
     _firstFrameReceived = false;  // Reset on setting change
+  }
+
+  /// Set colormap for waterfall display
+  /// 0=Viridis, 1=Plasma, 2=Inferno, 3=Magma, 4=Turbo
+  void setColormap(int colormapIndex) {
+    debugPrint('[VideoStream] setColormap: $colormapIndex');
+    
+    if (_channel == null) {
+      debugPrint('[VideoStream] Cannot set colormap - not connected');
+      return;
+    }
+    
+    // Clamp to valid range
+    final index = colormapIndex.clamp(0, 4);
+    
+    final msg = json.encode({
+      'command': 'set_colormap',
+      'colormap': index,
+    });
+    
+    try {
+      _channel!.sink.add(msg);
+      debugPrint('[VideoStream] Sent colormap command: $index');
+    } catch (e) {
+      debugPrint('[VideoStream] Send FAILED: $e');
+    }
   }
 
   @override

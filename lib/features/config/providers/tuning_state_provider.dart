@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/g20_api_service.dart';
 import '../../live_detection/providers/sdr_config_provider.dart';
+import '../../live_detection/providers/rx_state_provider.dart';
 
 /// Tuning operation mode
 enum TuningMode {
@@ -157,7 +158,7 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
     return true;
   }
 
-  /// Resume auto mode
+  /// Resume auto mode - restores RX2 to its saved state before manual mode
   Future<bool> resumeAuto() async {
     debugPrint('[TuningState] Resuming auto mode...');
     
@@ -170,7 +171,7 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
       clearError: true,
     );
 
-    // Release RX2
+    // Release RX2 via API
     final result = await _apiService.releaseRx2();
     
     if (!result.success) {
@@ -180,6 +181,10 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
       );
       return false;
     }
+
+    // RESTORE RX2 to saved state (before manual mode)
+    // This handles the stub simulation and will call libsidekiq in production
+    _ref.read(multiRxProvider.notifier).rx2ResumeToSaved();
 
     // Update state to auto mode
     state = state.copyWith(
@@ -191,7 +196,7 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
       lastUpdated: DateTime.now(),
     );
 
-    debugPrint('[TuningState] Auto mode active, RX2 released');
+    debugPrint('[TuningState] Auto mode active, RX2 restored to saved state');
     return true;
   }
 

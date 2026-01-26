@@ -175,6 +175,136 @@ def _generate_viridis_lut():
 VIRIDIS_LUT = _generate_viridis_lut()
 
 
+def _generate_plasma_lut():
+    """Generate plasma colormap lookup table."""
+    plasma_data = [
+        (0.050383, 0.029803, 0.527975),  # 0
+        (0.254627, 0.013882, 0.615419),  # 32
+        (0.417642, 0.000564, 0.658390),  # 64
+        (0.578304, 0.050412, 0.639747),  # 96
+        (0.719017, 0.129464, 0.570897),  # 128
+        (0.832299, 0.212395, 0.510864),  # 160
+        (0.913511, 0.319182, 0.431594),  # 192
+        (0.967640, 0.451086, 0.355486),  # 224
+        (0.988362, 0.998364, 0.644924),  # 255
+    ]
+    
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    positions = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+    
+    for i in range(256):
+        for j in range(len(positions) - 1):
+            if positions[j] <= i <= positions[j + 1]:
+                t = (i - positions[j]) / (positions[j + 1] - positions[j])
+                r = plasma_data[j][0] * (1 - t) + plasma_data[j + 1][0] * t
+                g = plasma_data[j][1] * (1 - t) + plasma_data[j + 1][1] * t
+                b = plasma_data[j][2] * (1 - t) + plasma_data[j + 1][2] * t
+                lut[i] = [int(r * 255), int(g * 255), int(b * 255)]
+                break
+    return lut
+
+def _generate_inferno_lut():
+    """Generate inferno colormap lookup table."""
+    inferno_data = [
+        (0.001462, 0.000466, 0.013866),  # 0
+        (0.116656, 0.024309, 0.211718),  # 32
+        (0.282884, 0.059549, 0.362896),  # 64
+        (0.451660, 0.085028, 0.387030),  # 96
+        (0.620005, 0.086054, 0.302653),  # 128
+        (0.775815, 0.110254, 0.173795),  # 160
+        (0.898898, 0.184801, 0.089373),  # 192
+        (0.969954, 0.363813, 0.131973),  # 224
+        (0.988362, 0.998364, 0.644924),  # 255
+    ]
+    
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    positions = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+    
+    for i in range(256):
+        for j in range(len(positions) - 1):
+            if positions[j] <= i <= positions[j + 1]:
+                t = (i - positions[j]) / (positions[j + 1] - positions[j])
+                r = inferno_data[j][0] * (1 - t) + inferno_data[j + 1][0] * t
+                g = inferno_data[j][1] * (1 - t) + inferno_data[j + 1][1] * t
+                b = inferno_data[j][2] * (1 - t) + inferno_data[j + 1][2] * t
+                lut[i] = [int(r * 255), int(g * 255), int(b * 255)]
+                break
+    return lut
+
+def _generate_magma_lut():
+    """Generate magma colormap lookup table."""
+    magma_data = [
+        (0.001462, 0.000466, 0.013866),  # 0
+        (0.082881, 0.050373, 0.188389),  # 32
+        (0.226475, 0.063536, 0.337255),  # 64
+        (0.392840, 0.084617, 0.423684),  # 96
+        (0.551461, 0.127509, 0.456259),  # 128
+        (0.713629, 0.179828, 0.418216),  # 160
+        (0.868793, 0.291727, 0.351837),  # 192
+        (0.969954, 0.493033, 0.428334),  # 224
+        (0.987053, 0.991438, 0.749504),  # 255
+    ]
+    
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    positions = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+    
+    for i in range(256):
+        for j in range(len(positions) - 1):
+            if positions[j] <= i <= positions[j + 1]:
+                t = (i - positions[j]) / (positions[j + 1] - positions[j])
+                r = magma_data[j][0] * (1 - t) + magma_data[j + 1][0] * t
+                g = magma_data[j][1] * (1 - t) + magma_data[j + 1][1] * t
+                b = magma_data[j][2] * (1 - t) + magma_data[j + 1][2] * t
+                lut[i] = [int(r * 255), int(g * 255), int(b * 255)]
+                break
+    return lut
+
+def _generate_turbo_lut():
+    """Generate turbo colormap lookup table."""
+    turbo_data = [
+        (0.18995, 0.07176, 0.23217),   # 0
+        (0.16529, 0.32186, 0.77037),   # 32
+        (0.09140, 0.56471, 0.89606),   # 64
+        (0.18282, 0.77361, 0.71698),   # 96
+        (0.42778, 0.92647, 0.49412),   # 128
+        (0.71961, 0.98165, 0.29529),   # 160
+        (0.95608, 0.81667, 0.17137),   # 192
+        (0.99314, 0.53392, 0.13255),   # 224
+        (0.84412, 0.18804, 0.15294),   # 255
+    ]
+    
+    lut = np.zeros((256, 3), dtype=np.uint8)
+    positions = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+    
+    for i in range(256):
+        for j in range(len(positions) - 1):
+            if positions[j] <= i <= positions[j + 1]:
+                t = (i - positions[j]) / (positions[j + 1] - positions[j])
+                r = turbo_data[j][0] * (1 - t) + turbo_data[j + 1][0] * t
+                g = turbo_data[j][1] * (1 - t) + turbo_data[j + 1][1] * t
+                b = turbo_data[j][2] * (1 - t) + turbo_data[j + 1][2] * t
+                lut[i] = [int(r * 255), int(g * 255), int(b * 255)]
+                break
+    return lut
+
+# Pre-generate all colormap LUTs
+PLASMA_LUT = _generate_plasma_lut()
+INFERNO_LUT = _generate_inferno_lut()
+MAGMA_LUT = _generate_magma_lut()
+TURBO_LUT = _generate_turbo_lut()
+
+# Colormap index to LUT mapping
+COLORMAP_LUTS = {
+    0: VIRIDIS_LUT,   # viridis (default)
+    1: PLASMA_LUT,    # plasma
+    2: INFERNO_LUT,   # inferno
+    3: MAGMA_LUT,     # magma
+    4: TURBO_LUT,     # turbo
+}
+
+COLORMAP_NAMES = ['viridis', 'plasma', 'inferno', 'magma', 'turbo']
+
+
 # =============================================================================
 # FFT DEBUG OUTPUT - Save high-res PNGs with detection boxes overlaid
 # =============================================================================
@@ -675,6 +805,10 @@ class VideoStreamServer:
         self.total_rows_written = 0  # Monotonic counter, never resets
         self.rows_this_frame = 0     # Rows added in current frame
         
+        # Colormap selection (0=viridis, 1=plasma, 2=inferno, 3=magma, 4=turbo)
+        self.current_colormap = 0
+        self.current_lut = VIRIDIS_LUT
+        
         # Suggested buffer height for Flutter client (uses 2.5s, not the parameter)
         self.suggested_buffer_height = int(self.time_span_seconds * video_fps * self.rows_per_frame)
         
@@ -724,7 +858,7 @@ class VideoStreamServer:
         indices = (normalized * 255).astype(np.uint8)
         
         # Apply colormap - shape (num_rows, target_width, 3)
-        rgb = VIRIDIS_LUT[indices]
+        rgb = self.current_lut[indices]
         
         # Add alpha channel - shape (num_rows, target_width, 4)
         rgba = np.zeros((num_rows, target_width, 4), dtype=np.uint8)
@@ -1057,6 +1191,35 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
                         import traceback
                         traceback.print_exc()
                 
+                elif cmd == 'set_db_range':
+                    try:
+                        min_db = float(data.get('min_db', -100))
+                        max_db = float(data.get('max_db', -20))
+                        
+                        # Calculate dynamic range from min/max
+                        dynamic_range = max_db - min_db
+                        
+                        # Update ONLY dynamic range - noise floor continues auto-tracking!
+                        old_dynamic_range = server.pipeline.waterfall_dynamic_range
+                        server.pipeline.waterfall_dynamic_range = dynamic_range
+                        
+                        # DO NOT change noise_floor_db - let it auto-track from actual signal
+                        
+                        print(f"[Pipeline] Dynamic range: {old_dynamic_range:.0f}dB -> {dynamic_range:.0f}dB (noise floor auto-tracks)", flush=True)
+                        
+                        # Send acknowledgment
+                        await websocket.send(json.dumps({
+                            'type': 'db_range_ack',
+                            'dynamic_range': dynamic_range,
+                            'noise_floor_auto': True,
+                        }))
+                        print(f"[Pipeline] Dynamic range change complete!", flush=True)
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in set_db_range: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                
                 elif cmd == 'set_fft_size':
                     try:
                         new_size = int(data.get('size', DEFAULT_FFT_SIZE))
@@ -1129,6 +1292,31 @@ async def video_ws_handler(websocket, iq_file: str, model_path: str):
                             'command': 'set_fft_size',
                             'message': str(e)
                         }))
+                
+                elif cmd == 'set_colormap':
+                    try:
+                        colormap_idx = int(data.get('colormap', 0))
+                        colormap_idx = max(0, min(4, colormap_idx))  # Clamp to 0-4
+                        
+                        old_colormap = server.current_colormap
+                        server.current_colormap = colormap_idx
+                        server.current_lut = COLORMAP_LUTS.get(colormap_idx, VIRIDIS_LUT)
+                        
+                        colormap_name = COLORMAP_NAMES[colormap_idx] if colormap_idx < len(COLORMAP_NAMES) else 'viridis'
+                        print(f"[Pipeline] Colormap changing: {COLORMAP_NAMES[old_colormap]} -> {colormap_name}", flush=True)
+                        
+                        # Send acknowledgment
+                        await websocket.send(json.dumps({
+                            'type': 'colormap_ack',
+                            'colormap': colormap_idx,
+                            'name': colormap_name,
+                        }))
+                        print(f"[Pipeline] Colormap change complete!", flush=True)
+                        
+                    except Exception as e:
+                        print(f"[Pipeline] ERROR in set_colormap: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
     except Exception as e:
         logger.error(f"Video handler error: {e}")
     finally:
