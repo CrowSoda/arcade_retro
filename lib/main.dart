@@ -19,9 +19,6 @@ const bool _enableDebugLogs = bool.fromEnvironment(
   defaultValue: false,  // CLEAN CONSOLE BY DEFAULT
 );
 
-/// Original debugPrint function (saved for optional restoration)
-final _originalDebugPrint = debugPrint;
-
 /// Silent debugPrint - does nothing
 void _silentDebugPrint(String? message, {int? wrapWidth}) {
   // Intentionally empty - silences ALL debugPrint calls

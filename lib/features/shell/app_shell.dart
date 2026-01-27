@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/config/router.dart';
 import '../../core/config/theme.dart';
 import '../../core/services/backend_launcher.dart';
-import '../config/providers/tuning_state_provider.dart';
 import '../live_detection/providers/sdr_config_provider.dart';
 import '../live_detection/providers/rx_state_provider.dart';
 import '../live_detection/providers/video_stream_provider.dart';
