@@ -6,7 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/theme.dart';
-import '../../config/providers/tuning_state_provider.dart';
+import '../../live_detection/providers/sdr_config_provider.dart';
 
 /// Fixed color for recording indicator - cyan, neutral and visible
 const recordingIndicatorColor = Color(0xFF00BCD4);

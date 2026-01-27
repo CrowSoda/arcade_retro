@@ -23,6 +23,15 @@ class MissionConfig {
   /// List of signal names to detect in this mission
   final List<String> effectiveSignals;
 
+  /// Model name to use for inference
+  final String? modelName;
+
+  /// Confidence threshold for detections (0.0 to 1.0)
+  final double confidenceThreshold;
+
+  /// Whether to automatically record when detections occur
+  final bool autoRecordDetections;
+
   /// When this mission was created
   final DateTime created;
 
@@ -39,6 +48,9 @@ class MissionConfig {
     this.bandwidthMhz = 20.0,
     this.dwellTimeSec = 1.0,
     this.effectiveSignals = const [],
+    this.modelName,
+    this.confidenceThreshold = 0.5,
+    this.autoRecordDetections = false,
     required this.created,
     required this.modified,
     this.filePath,
@@ -131,6 +143,9 @@ class MissionConfig {
     double? bandwidthMhz,
     double? dwellTimeSec,
     List<String>? effectiveSignals,
+    String? modelName,
+    double? confidenceThreshold,
+    bool? autoRecordDetections,
     DateTime? created,
     DateTime? modified,
     String? filePath,
@@ -142,6 +157,9 @@ class MissionConfig {
       bandwidthMhz: bandwidthMhz ?? this.bandwidthMhz,
       dwellTimeSec: dwellTimeSec ?? this.dwellTimeSec,
       effectiveSignals: effectiveSignals ?? this.effectiveSignals,
+      modelName: modelName ?? this.modelName,
+      confidenceThreshold: confidenceThreshold ?? this.confidenceThreshold,
+      autoRecordDetections: autoRecordDetections ?? this.autoRecordDetections,
       created: created ?? this.created,
       modified: modified ?? this.modified,
       filePath: filePath ?? this.filePath,
