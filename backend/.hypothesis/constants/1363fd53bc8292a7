@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\logger_config.py
+# hypothesis_version: 6.151.2
+
+[500, 1024, '%Y-%m-%d %H:%M:%S', '%Y-%m-%d_%H%M%S', '(unknown file)', '1', 'DEBUG', 'G20_PROD', 'INFO', 'WARNING', 'Z', 'asyncio', 'exception', 'extra_fields', 'g20_*.log*', 'grpc', 'level', 'logger', 'logs', 'message', 'timestamp', 'true', 'utf-8', 'websockets', 'yes']

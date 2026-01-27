@@ -8,12 +8,18 @@ Implements proper sub-band extraction for CNN training data:
 - Unit power normalization
 """
 
-from .subband_extractor import SubbandExtractor, ExtractionParams
-from .filters import design_aa_filter, calculate_filter_taps
+# Logging
+from logger_config import get_logger
+
+from .filters import calculate_filter_taps, design_aa_filter
+from .subband_extractor import ExtractionParams, SubbandExtractor
+
+logger = get_logger("__init__")
+
 
 __all__ = [
-    'SubbandExtractor',
-    'ExtractionParams', 
-    'design_aa_filter',
-    'calculate_filter_taps',
+    "SubbandExtractor",
+    "ExtractionParams",
+    "design_aa_filter",
+    "calculate_filter_taps",
 ]

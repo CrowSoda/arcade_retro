@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\dsp\filters.py
+# hypothesis_version: 6.151.2
+
+[0.0, 1e-12, 1e-10, 0.07886, 0.1, 0.1102, 0.4, 0.5, 0.5842, 0.8, 0.99, 1.0, 1.2, 1.5, 2.285, 8.7, 60.0, 100.0, -100, 255, 4095, 8192, 'cutoff_freq_hz', 'filters', 'frequencies', 'group_delay_samples', 'hamming', 'kaiser', 'magnitude_db', 'num_taps', 'passband_ripple_db', 'phase']

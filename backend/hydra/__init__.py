@@ -7,4 +7,9 @@ This module provides:
     - BackboneExtractor: One-time migration from full models
 """
 
+# Logging
+from logger_config import get_logger
+
 from .config import *
+
+logger = get_logger("__init__")

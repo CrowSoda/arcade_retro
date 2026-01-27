@@ -13,12 +13,18 @@ Available colormaps:
 
 Usage:
     from colormaps import get_colormap, COLORMAP_NAMES
-    
+
     lut = get_colormap(0)  # Returns VIRIDIS LUT
     rgb = lut[db_normalized]  # Index with 0-255 normalized dB value
 """
 
 import numpy as np
+
+# Logging
+from logger_config import get_logger
+
+logger = get_logger("colormaps")
+
 
 # =============================================================================
 # COLORMAP CONTROL POINTS
@@ -67,7 +73,7 @@ INFERNO_CONTROL_POINTS = [
     (252, 255, 164),
 ]
 
-# Magma control points  
+# Magma control points
 MAGMA_CONTROL_POINTS = [
     (0, 0, 4),
     (18, 14, 54),
@@ -101,6 +107,7 @@ TURBO_CONTROL_POINTS = [
 # LUT GENERATION
 # =============================================================================
 
+
 def _interpolate_color(c1: tuple, c2: tuple, t: float) -> tuple:
     """Linearly interpolate between two RGB colors."""
     return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
@@ -109,28 +116,32 @@ def _interpolate_color(c1: tuple, c2: tuple, t: float) -> tuple:
 def _generate_lut(control_points: list) -> np.ndarray:
     """
     Generate a 256-entry RGB lookup table from control points.
-    
+
     Args:
         control_points: List of (R, G, B) tuples defining the colormap
-        
+
     Returns:
         numpy array of shape (256, 3) with uint8 RGB values
     """
     n_points = len(control_points)
     lut = np.zeros((256, 3), dtype=np.uint8)
-    
+
     # Calculate positions for each control point (evenly spaced 0-255)
     positions = [int(255 * i / (n_points - 1)) for i in range(n_points)]
-    
+
     for i in range(256):
         # Find which segment we're in
         for j in range(n_points - 1):
             if positions[j] <= i <= positions[j + 1]:
                 # Interpolate within this segment
-                t = (i - positions[j]) / (positions[j + 1] - positions[j]) if positions[j + 1] != positions[j] else 0
+                t = (
+                    (i - positions[j]) / (positions[j + 1] - positions[j])
+                    if positions[j + 1] != positions[j]
+                    else 0
+                )
                 lut[i] = _interpolate_color(control_points[j], control_points[j + 1], t)
                 break
-    
+
     return lut
 
 
@@ -146,20 +157,21 @@ TURBO_LUT = _generate_lut(TURBO_CONTROL_POINTS)
 
 # All LUTs in indexed list
 COLORMAPS = [VIRIDIS_LUT, PLASMA_LUT, INFERNO_LUT, MAGMA_LUT, TURBO_LUT]
-COLORMAP_NAMES = ['Viridis', 'Plasma', 'Inferno', 'Magma', 'Turbo']
+COLORMAP_NAMES = ["Viridis", "Plasma", "Inferno", "Magma", "Turbo"]
 
 
 # =============================================================================
 # PUBLIC API
 # =============================================================================
 
+
 def get_colormap(index: int) -> np.ndarray:
     """
     Get colormap LUT by index.
-    
+
     Args:
         index: 0=Viridis, 1=Plasma, 2=Inferno, 3=Magma, 4=Turbo
-        
+
     Returns:
         numpy array of shape (256, 3) with uint8 RGB values
     """
@@ -169,10 +181,10 @@ def get_colormap(index: int) -> np.ndarray:
 def get_colormap_by_name(name: str) -> np.ndarray:
     """
     Get colormap LUT by name.
-    
+
     Args:
         name: One of 'viridis', 'plasma', 'inferno', 'magma', 'turbo' (case insensitive)
-        
+
     Returns:
         numpy array of shape (256, 3) with uint8 RGB values
     """
@@ -180,7 +192,7 @@ def get_colormap_by_name(name: str) -> np.ndarray:
     for i, cmap_name in enumerate(COLORMAP_NAMES):
         if cmap_name.lower() == name_lower:
             return COLORMAPS[i]
-    
+
     # Default to viridis
     return VIRIDIS_LUT
 
@@ -188,11 +200,11 @@ def get_colormap_by_name(name: str) -> np.ndarray:
 def apply_colormap(data: np.ndarray, colormap_index: int = 0) -> np.ndarray:
     """
     Apply colormap to normalized data (0-255 uint8).
-    
+
     Args:
         data: Input data normalized to 0-255 (uint8)
         colormap_index: Which colormap to use (0-4)
-        
+
     Returns:
         RGB array with shape (*data.shape, 3)
     """
@@ -201,20 +213,17 @@ def apply_colormap(data: np.ndarray, colormap_index: int = 0) -> np.ndarray:
 
 
 def apply_colormap_db(
-    data_db: np.ndarray, 
-    min_db: float = -100.0, 
-    max_db: float = -20.0,
-    colormap_index: int = 0
+    data_db: np.ndarray, min_db: float = -100.0, max_db: float = -20.0, colormap_index: int = 0
 ) -> np.ndarray:
     """
     Apply colormap to dB data with normalization.
-    
+
     Args:
         data_db: Input data in dB
         min_db: Minimum dB value (maps to LUT index 0)
         max_db: Maximum dB value (maps to LUT index 255)
         colormap_index: Which colormap to use (0-4)
-        
+
     Returns:
         RGB array with shape (*data_db.shape, 3)
     """
