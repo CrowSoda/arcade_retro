@@ -216,10 +216,18 @@ class TestServerIntegration:
             proc.wait()
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Flaky in CI - WebSocket closes immediately")
     async def test_websocket_connection(self, server_process):
-        """Test actual WebSocket connection to launched server."""
+        """Test actual WebSocket connection to launched server.
+
+        This test verifies:
+        1. Server accepts WebSocket connections
+        2. Server responds appropriately (even if it closes immediately when no SDR)
+
+        A clean close (code 1000) is SUCCESS - it means the server accepted,
+        processed, and properly closed the connection.
+        """
         import websockets
+        from websockets.exceptions import ConnectionClosedOK
 
         # Give server a moment to stabilize
         await asyncio.sleep(0.5)
@@ -241,11 +249,19 @@ class TestServerIntegration:
                     # No data within timeout is okay - connection still valid
                     pass
 
+        except ConnectionClosedOK:
+            # Server accepted connection and closed cleanly (code 1000)
+            # This is EXPECTED when no SDR is connected - server has nothing to send
+            # The important part: connection WAS established and server responded properly
+            connected = True
         except websockets.exceptions.ConnectionClosedError:
-            # Server may close connection for /video without SDR - that's okay
-            connected = True  # Connection was established before close
+            # Server closed with an error code - still means connection was established
+            connected = True
+        except ConnectionRefusedError:
+            pytest.fail("Server refused connection - not listening on port")
         except Exception as e:
-            pytest.fail(f"WebSocket connection failed: {e}")
+            # Only fail on unexpected errors
+            pytest.fail(f"WebSocket connection failed unexpectedly: {type(e).__name__}: {e}")
 
         assert connected, "WebSocket connection was never established"
 
