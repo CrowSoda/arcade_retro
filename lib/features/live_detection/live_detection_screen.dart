@@ -31,26 +31,26 @@ class LiveDetectionScreen extends ConsumerStatefulWidget {
 
 class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
   int _lastPruneRow = 0;  // Track last prune to avoid excessive calls
-  
+
   @override
   void initState() {
     super.initState();
-    
+
     // Set up detection forwarding from video stream to detection provider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final videoNotifier = ref.read(videoStreamProvider.notifier);
       final detectionNotifier = ref.read(detectionProvider.notifier);
-      
+
       videoNotifier.setDetectionCallback((detections, pts) {
         // Convert and add to detection provider
-        final converted = detections.map((d) => 
+        final converted = detections.map((d) =>
           convertVideoDetection(d, pts)
         ).toList();
-        
+
         detectionNotifier.addDetections(converted);
-        
+
       });
-      
+
       // Connect to video stream
       videoNotifier.connect('localhost', 8765);
     });
@@ -60,14 +60,14 @@ class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
   Widget build(BuildContext context) {
     // Trigger auto-start of inference when backend is ready
     ref.watch(autoStartInferenceProvider);
-    
+
     // HYDRA: Watch mission head loader to auto-load detection heads when mission changes
     // This ensures detection heads are loaded/unloaded when mission is activated/cleared
     ref.watch(missionHeadLoaderProvider);
-    
+
     final displayMode = ref.watch(displayModeProvider);
     final isCollapsed = ref.watch(rightPanelCollapsedProvider);
-    
+
     // FPS CONTROL: Listen for FPS changes and send to backend
     ref.listen<int>(waterfallFpsProvider, (previous, next) {
       final currentState = ref.read(videoStreamProvider);
@@ -75,17 +75,17 @@ class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
         ref.read(videoStreamProvider.notifier).setFps(next);
       }
     });
-    
+
     // PSD BOX LIFECYCLE: Prune detections when waterfall scrolls or buffer changes
     ref.listen<VideoStreamState>(videoStreamProvider, (previous, next) {
       final detectionNotifier = ref.read(detectionProvider.notifier);
-      
+
       // Clear all detections on reconnect (connection state changed to connected)
       if (previous?.isConnected != true && next.isConnected) {
         detectionNotifier.clearAll();
         _lastPruneRow = 0;
         debugPrint('[PSD Lifecycle] Connection established - cleared all detection boxes');
-        
+
         // Send initial FPS if not default
         final currentFps = ref.read(waterfallFpsProvider);
         if (currentFps != 30) {
@@ -93,12 +93,12 @@ class _LiveDetectionScreenState extends ConsumerState<LiveDetectionScreen> {
         }
         return;
       }
-      
+
       // Prune detections that have scrolled off based on absoluteRow
       // Only prune every ~30 rows (about 1 frame) to avoid excessive overhead
       final currentRow = next.totalRowsReceived;
       final bufferHeight = next.bufferHeight;
-      
+
       if (currentRow - _lastPruneRow >= 30 && bufferHeight > 0) {
         detectionNotifier.pruneByAbsoluteRow(currentRow, bufferHeight);
         _lastPruneRow = currentRow;
@@ -245,17 +245,17 @@ class _DetectionTableWithLongPress extends ConsumerWidget {
           debugPrint('[Map] No detections to show');
           return;
         }
-        
+
         // Calculate bounds that fit all detections and switch to map view
         final currentMode = ref.read(mapStateProvider).displayMode;
         ref.read(mapStateProvider.notifier).zoomToFitAllDetections(detections);
-        
+
         // Switch to map view if not already
         if (currentMode != DisplayMode.map) {
           ref.read(mapStateProvider.notifier).setDisplayMode(DisplayMode.map);
           ref.read(waterfallProvider.notifier).skipRendering();
         }
-        
+
         debugPrint('[Map] Showing ${detections.length} detections on map');
       },
       child: const DetectionTable(),
@@ -281,16 +281,16 @@ class _DisplayModeHeader extends ConsumerWidget {
         children: [
           // Title based on mode
           Icon(
-            displayMode == DisplayMode.waterfall 
-                ? Icons.waves 
+            displayMode == DisplayMode.waterfall
+                ? Icons.waves
                 : Icons.map,
             color: G20Colors.primary,
             size: 20,
           ),
           const SizedBox(width: 8),
           Text(
-            displayMode == DisplayMode.waterfall 
-                ? 'Spectrum View' 
+            displayMode == DisplayMode.waterfall
+                ? 'Spectrum View'
                 : 'Detection Map',
             style: const TextStyle(
               fontSize: 14,
@@ -465,7 +465,7 @@ class _MissionPickerButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final activeMission = ref.watch(activeMissionProvider);
     final missions = ref.watch(missionsProvider);
-    
+
     return Material(
       color: activeMission != null ? Colors.green.shade700 : G20Colors.cardDark,
       borderRadius: BorderRadius.circular(8),
@@ -512,14 +512,14 @@ class _MissionPickerButton extends ConsumerWidget {
         onSelect: (mission) {
           ref.read(activeMissionProvider.notifier).state = mission;
           Navigator.pop(ctx);
-          
+
           // Log mission activation
           debugPrint('[Live] ════════════════════════════════════════');
           debugPrint('[Live] MISSION ACTIVATED: ${mission.name}');
           debugPrint('[Live] BW: ${mission.bandwidthMhz} MHz, Dwell: ${mission.dwellTimeSec} sec');
           debugPrint('[Live] Ranges: ${mission.freqRanges.length}, Models: ${mission.models.length}');
           debugPrint('[Live] ════════════════════════════════════════');
-          
+
           // HYDRA: Load detection heads for this mission
           final signals = mission.models.map((m) => m.id).toList();
           if (signals.isNotEmpty) {
@@ -613,7 +613,7 @@ class _MissionPickerDialog extends StatelessWidget {
                 ],
               ),
             ),
-            
+
             // Mission list
             Flexible(
               child: missions.isEmpty
@@ -647,7 +647,7 @@ class _MissionPickerDialog extends StatelessWidget {
                       },
                     ),
             ),
-            
+
             // Footer
             Container(
               padding: const EdgeInsets.all(16),

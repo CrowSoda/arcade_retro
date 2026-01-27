@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\dsp\subband_extractor.py
+# hypothesis_version: 6.151.2
+
+[b'\x00', b'G20\x00', b'RFCAP\x00\x00\x00', 0.0, 0.02, 0.1, 0.15, 0.2, 0.3, 0.4, 0.55, 0.8, 0.85, 0.9, 0.95, 0.99, 1.0, 2.0, 2.5, 8.6, 60.0, 100, 255, 512, 4095, 2000000, '<I', '<Q', '<d', 'No data to extract', 'UNKNOWN', 'ab', 'bandwidth', 'center_freq', 'center_offset', 'center_offset_hz', 'decimation_ratio', 'done', 'filter_taps', 'input_samples', 'kaiser', 'latitude', 'longitude', 'normalize', 'num_samples', 'output_center_freq', 'output_path', 'output_rate', 'output_samples', 'processing_time', 'rb', 'reading', 'remove_dc', 'replace', 'resample_down', 'resample_up', 'resampling', 'sample_rate', 'shifting', 'signal_name', 'source_rate', 'source_rate_hz', 'start_time', 'stopband_db', 'subband_extractor', 'target_bandwidth_hz', 'target_rate_hz', 'utf-8', 'version', 'wb', 'working', 'writing']

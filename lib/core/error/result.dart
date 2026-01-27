@@ -1,11 +1,11 @@
 /// Result Type - Railway-oriented error handling for G20
-/// 
+///
 /// Features:
 /// - Type-safe error handling without exceptions
 /// - Chainable transformations (map, flatMap)
 /// - Pattern matching for success/failure
 /// - Async support
-/// 
+///
 /// Usage:
 ///   Result<User, ApiError> result = await api.getUser(id);
 ///   result.fold(
@@ -248,16 +248,16 @@ sealed class G20Error {
 /// Network/API errors
 final class NetworkError extends G20Error {
   final int? statusCode;
-  
+
   const NetworkError(super.message, {super.code, super.cause, super.stackTrace, this.statusCode});
 
-  factory NetworkError.timeout([String? message]) => 
+  factory NetworkError.timeout([String? message]) =>
       NetworkError(message ?? 'Request timed out', code: 'TIMEOUT');
-  
-  factory NetworkError.noConnection([String? message]) => 
+
+  factory NetworkError.noConnection([String? message]) =>
       NetworkError(message ?? 'No network connection', code: 'NO_CONNECTION');
-  
-  factory NetworkError.serverError(int statusCode, [String? message]) => 
+
+  factory NetworkError.serverError(int statusCode, [String? message]) =>
       NetworkError(message ?? 'Server error', code: 'SERVER_ERROR', statusCode: statusCode);
 }
 
@@ -275,7 +275,7 @@ final class HardwareError extends G20Error {
 /// Validation errors
 final class ValidationError extends G20Error {
   final String? field;
-  
+
   const ValidationError(super.message, {this.field, super.code, super.cause, super.stackTrace});
 
   factory ValidationError.required(String field) =>

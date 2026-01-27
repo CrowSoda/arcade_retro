@@ -78,15 +78,15 @@ def box_to_chunk_coords(sig, cstart, cend, tb, fb, freqs):
     """
     t_s = sig["time_start"]
     t_e = sig["time_stop"]
-    
+
     # Clip to chunk bounds
     if t_e < cstart or t_s > cend:
         return None  # Signal not in this chunk
-    
+
     is_tstart = max(t_s, cstart)
     is_tstop = min(t_e, cend)
     chunk_len = cend - cstart
-    
+
     # Convert TIME to spectrogram X coordinate (bins)
     local_t_s = is_tstart - cstart  # Seconds from chunk start
     local_t_e = is_tstop - cstart
@@ -98,13 +98,13 @@ def box_to_chunk_coords(sig, cstart, cend, tb, fb, freqs):
     f_h = sig["freq_high"] * 1e6
     fmn = freqs[0]   # Lowest freq in shifted array
     fmx = freqs[-1]  # Highest freq in shifted array
-    
+
     # Clip to frequency range
     if f_h < fmn or f_l > fmx:
         return None
     f_h = min(f_h, fmx)
     f_l = max(f_l, fmn)
-    
+
     # Find bin indices using searchsorted
     def find_bin_for_freq(ff):
         i = np.searchsorted(freqs, ff, side="left")
@@ -112,7 +112,7 @@ def box_to_chunk_coords(sig, cstart, cend, tb, fb, freqs):
 
     y_min_idx = find_bin_for_freq(f_l)  # Bin index for low freq
     y_max_idx = find_bin_for_freq(f_h)  # Bin index for high freq
-    
+
     return {
         "label": sig.get("label", "signal"),
         "x_min": float(x_min),   # Time bin (NOT normalized)
@@ -160,7 +160,7 @@ plt.imsave(out_png, resized, cmap="gray", origin="lower")
     {
       "label": "signal",
       "x_min": 123.5,    // Pixel coordinates
-      "y_min": 456.2,    // Pixel coordinates  
+      "y_min": 456.2,    // Pixel coordinates
       "x_max": 234.1,
       "y_max": 567.8
     }
@@ -182,13 +182,13 @@ void _createBox(double x1, double y1, double x2, double y2) {
     // Convert normalized coords to ABSOLUTE time
     final absTimeStart = _windowStartSec + min(x1, x2) * _windowLengthSec;
     final absTimeEnd = _windowStartSec + max(x1, x2) * _windowLengthSec;
-    
+
     // Calculate frequency bounds (but using DIFFERENT formula)
     final bwHz = widget.header!.bandwidthHz;
     final cfHz = widget.header!.centerFreqHz;
     freqStartMHz = (cfHz - bwHz/2 + (1 - max(y1, y2)) * bwHz) / 1e6;
     freqEndMHz = (cfHz - bwHz/2 + (1 - min(y1, y2)) * bwHz) / 1e6;
-    
+
     final box = LabelBox(
       x1: x1, y1: y1, x2: x2, y2: y2,  // NORMALIZED 0-1
       timeStartSec: absTimeStart,
@@ -209,12 +209,12 @@ void _createBox(double x1, double y1, double x2, double y2) {
 // Compute FFT frames
 for (int timeFrame = 0; timeFrame < numTimeFrames; timeFrame++) {
     // ... FFT computation ...
-    
+
     // Power spectrum - store as column
     for (int freqBin = 0; freqBin < _spectrogramHeight; freqBin++) {
         // FFT shift
         final fftBin = (freqBin + fftSize ~/ 2) % fftSize;
-        
+
         // Row = frequency (INVERTED so high freq at top)
         final row = _spectrogramHeight - 1 - freqBin;
         _spectrogramData![row * _spectrogramWidth + timeFrame] = dB;
@@ -272,7 +272,7 @@ def compute_spectrogram(self, iq_data: np.ndarray) -> np.ndarray:
     nfft = INFERENCE_FFT_SIZE      # e.g., 4096
     hop = INFERENCE_HOP_LENGTH     # e.g., 1024
     dynamic_range = INFERENCE_DYNAMIC_RANGE_DB  # e.g., 50
-    
+
     # Compute STFT
     window = np.hanning(nfft)
     frames = []
@@ -283,24 +283,24 @@ def compute_spectrogram(self, iq_data: np.ndarray) -> np.ndarray:
         power = np.abs(spectrum) ** 2 + 1e-10
         power_db = 10 * np.log10(power)
         frames.append(power_db)
-    
+
     spectrogram = np.stack(frames, axis=1)  # (nfft, num_frames)
-    
+
     # Normalize
     max_val = spectrogram.max()
     min_val = max_val - dynamic_range
     spectrogram = np.clip(spectrogram, min_val, max_val)
     spectrogram = (spectrogram - min_val) / dynamic_range
-    
+
     # Resize to output size
     from scipy.ndimage import zoom
     target_h, target_w = INFERENCE_OUTPUT_SIZE  # e.g., (1024, 1024)
     zoom_factors = (target_h / spectrogram.shape[0], target_w / spectrogram.shape[1])
     spectrogram = zoom(spectrogram, zoom_factors, order=1)
-    
+
     # Convert to uint8
     spectrogram = (spectrogram * 255).astype(np.uint8)
-    
+
     return spectrogram
 ```
 
@@ -317,13 +317,13 @@ for box in boxes:
     y1_px = int(box["y1"] * h)  # Direct multiplication
     x2_px = int(box["x2"] * w)
     y2_px = int(box["y2"] * h)
-    
+
     # Ensure min < max
     x_min = min(x1_px, x2_px)
     x_max = max(x1_px, x2_px)
     y_min = min(y1_px, y2_px)
     y_max = max(y1_px, y2_px)
-    
+
     pixel_boxes.append({
         "x_min": x_min,
         "y_min": y_min,
@@ -341,22 +341,22 @@ def __getitem__(self, idx):
     # Load spectrogram
     data = np.load(npz_path)
     spec = data['spectrogram']  # uint8 (1024, 1024)
-    
+
     # Read box from JSON
     with open(json_path) as f:
         metadata = json.load(f)
-    
+
     for b in metadata.get("boxes", []):
         x_min = b["x_min"]
         y_min = b["y_min"]
         x_max = b["x_max"]
         y_max = b["y_max"]
-        
+
         # Y-FLIP FIX (recently added)
         h = spec.shape[0]
         y_min_new = h - y_max
         y_max_new = h - y_min
-        
+
         boxes.append([x_min, y_min_new, x_max, y_max_new])
 ```
 

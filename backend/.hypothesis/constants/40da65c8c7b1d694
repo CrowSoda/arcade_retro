@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\config\settings.py
+# hypothesis_version: 6.151.2
+
+[0.0, 0.3, 0.5, 1.0, 2.5, 12.0, 20.0, 30.0, 34.0, 60.0, 80.0, 825.0, 6000.0, 100, 2048, 4096, 50051, 65536, '15W', '30W', '50W', 'Available colormaps', 'Default bandwidth', 'Default colormap', 'Default gain', 'Default time span', 'Display range', 'Enable debug mode', 'Enable file logging', 'Frames to accumulate', 'G20_', 'G20_DISPLAY_', 'G20_FFT_', 'G20_INFERENCE_', 'G20_JETSON_', 'G20_LOG_', 'G20_PATH_', 'G20_SDR_', 'G20_SERVER_', 'INFO', 'LOCKED', 'LOCKED - 50% overlap', 'Max GPU memory', 'Maximum gain', 'Power mode', 'Sample rate', '__', 'background', 'config', 'data', 'gRPC server port', 'inferno', 'json', 'logs', 'magma', 'models', 'plasma', 'signal', 'signals', 'training_data', 'turbo', 'viridis']

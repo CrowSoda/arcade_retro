@@ -14,7 +14,7 @@ class DetectionTable extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detections = ref.watch(detectionProvider);
-    
+
     // Group by className, keep only most recent per type
     final uniqueDetections = <String, Detection>{};
     for (final det in detections) {
@@ -183,7 +183,7 @@ class _DetectionRow extends ConsumerWidget {
   /// Show capture/labeling dialog for retraining
   void _showCaptureDialog(BuildContext context, WidgetRef ref) {
     final color = getSOIColor(detection.className);
-    
+
     showDialog(
       context: context,
       builder: (context) => _CaptureDialog(
@@ -210,7 +210,7 @@ class _CaptureDialog extends ConsumerStatefulWidget {
 
 class _CaptureDialogState extends ConsumerState<_CaptureDialog> {
   int _durationMinutes = 5;  // Default 5 min
-  
+
   static const _durations = [1, 2, 5, 10];  // minutes
 
   @override
@@ -243,7 +243,7 @@ class _CaptureDialogState extends ConsumerState<_CaptureDialog> {
             style: const TextStyle(fontSize: 12, color: G20Colors.textSecondaryDark),
           ),
           const SizedBox(height: 16),
-          
+
           // Duration selector
           const Text('Duration:', style: TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark)),
           const SizedBox(height: 8),
@@ -255,7 +255,7 @@ class _CaptureDialogState extends ConsumerState<_CaptureDialog> {
               onTap: () => setState(() => _durationMinutes = d),
             )).toList(),
           ),
-          
+
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(8),
@@ -287,7 +287,7 @@ class _CaptureDialogState extends ConsumerState<_CaptureDialog> {
 
   void _startCapture(BuildContext context) {
     Navigator.pop(context);
-    
+
     // Start drawing mode with selected duration
     ref.read(manualCaptureProvider.notifier).startDrawingMode(
       widget.detection.freqMHz.toStringAsFixed(2),

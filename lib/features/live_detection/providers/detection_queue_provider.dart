@@ -1,10 +1,10 @@
 // lib/features/live_detection/providers/detection_queue_provider.dart
 /// Priority-based detection queue for dual-RX operation
-/// 
+///
 /// ARCHITECTURE:
 /// - RX1: ALWAYS scanning (constant detections, never compromised)
 /// - RX2: Collection channel (tunes to detected signals for recording)
-/// 
+///
 /// When RX1 detects a priority signal:
 /// 1. Detection is added to queue with priority
 /// 2. If RX2 is free, it tunes to the signal and collects
@@ -32,7 +32,7 @@ extension SignalPriorityExtension on SignalPriority {
       case SignalPriority.low: return 'LOW';
     }
   }
-  
+
   /// Get priority from class name (configurable mapping)
   static SignalPriority fromClassName(String className) {
     // TODO: Make this configurable via mission config
@@ -62,7 +62,7 @@ class DetectionQueueEntry {
   final double confidence;
   final DateTime detectedAt;
   final int? collectionDurationSec;  // How long to collect (null = default)
-  
+
   DetectionQueueEntry({
     required this.detectionId,
     required this.freqMHz,
@@ -73,7 +73,7 @@ class DetectionQueueEntry {
     this.collectionDurationSec,
     DateTime? detectedAt,
   }) : detectedAt = detectedAt ?? DateTime.now();
-  
+
   @override
   String toString() => 'Queue[$priority]: $className @ $freqMHz MHz';
 }
@@ -84,14 +84,14 @@ class CollectionStatus {
   final DateTime startedAt;
   final int durationSec;
   final double progress;  // 0.0 - 1.0
-  
+
   const CollectionStatus({
     required this.entry,
     required this.startedAt,
     required this.durationSec,
     this.progress = 0.0,
   });
-  
+
   int get elapsedSec => DateTime.now().difference(startedAt).inSeconds;
   int get remainingSec => (durationSec - elapsedSec).clamp(0, durationSec);
   bool get isComplete => elapsedSec >= durationSec;
@@ -104,7 +104,7 @@ class DetectionQueueState {
   final bool rx2Available;
   final int totalCollected;  // Count of completed collections
   final int totalDropped;    // Count of detections that aged out
-  
+
   const DetectionQueueState({
     this.queue = const [],
     this.currentCollection,
@@ -112,7 +112,7 @@ class DetectionQueueState {
     this.totalCollected = 0,
     this.totalDropped = 0,
   });
-  
+
   DetectionQueueState copyWith({
     List<DetectionQueueEntry>? queue,
     CollectionStatus? currentCollection,
@@ -129,7 +129,7 @@ class DetectionQueueState {
       totalDropped: totalDropped ?? this.totalDropped,
     );
   }
-  
+
   int get queueLength => queue.length;
   bool get hasQueue => queue.isNotEmpty;
   bool get isCollecting => currentCollection != null;
@@ -141,9 +141,9 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
   static const int _defaultCollectionDurationSec = 30;
   static const int _maxQueueSize = 20;
   static const int _maxAgeMinutes = 5;  // Drop detections older than this
-  
+
   DetectionQueueNotifier(this._ref) : super(const DetectionQueueState());
-  
+
   /// Called when RX1 detects a signal worth collecting
   /// Priority is determined by class name mapping
   void onDetection({
@@ -155,7 +155,7 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
     int? collectionDurationSec,
   }) {
     final priority = SignalPriorityExtension.fromClassName(className);
-    
+
     final entry = DetectionQueueEntry(
       detectionId: detectionId,
       freqMHz: freqMHz,
@@ -165,28 +165,28 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
       confidence: confidence,
       collectionDurationSec: collectionDurationSec,
     );
-    
+
     // Check for duplicate (same freq within 1 MHz)
-    final isDuplicate = state.queue.any((e) => 
-      (e.freqMHz - freqMHz).abs() < 1.0 && 
+    final isDuplicate = state.queue.any((e) =>
+      (e.freqMHz - freqMHz).abs() < 1.0 &&
       e.className == className
     );
-    
+
     if (isDuplicate) {
       debugPrint('🎯 Skipping duplicate detection: $className @ $freqMHz MHz');
       return;
     }
-    
+
     // Add to queue
     var newQueue = [...state.queue, entry];
-    
+
     // Sort by priority, then by time (oldest first within same priority)
     newQueue.sort((a, b) {
       final priorityCmp = a.priority.index.compareTo(b.priority.index);
       if (priorityCmp != 0) return priorityCmp;
       return a.detectedAt.compareTo(b.detectedAt);
     });
-    
+
     // Trim queue if too large (drop lowest priority items)
     if (newQueue.length > _maxQueueSize) {
       final dropped = newQueue.length - _maxQueueSize;
@@ -199,13 +199,13 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
     } else {
       state = state.copyWith(queue: newQueue);
     }
-    
+
     debugPrint('🎯 Queued detection: $entry (queue: ${state.queueLength})');
-    
+
     // Try to start collection if RX2 is free
     _tryStartNextCollection();
   }
-  
+
   /// Manually queue a detection with explicit priority
   void queueManual({
     required double freqMHz,
@@ -222,56 +222,56 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
       collectionDurationSec: collectionDurationSec,
     );
   }
-  
+
   /// Try to start the next collection (if RX2 is available)
   void _tryStartNextCollection() {
     if (!state.rx2Available || state.queue.isEmpty || state.isCollecting) {
       return;
     }
-    
+
     // Age out old detections
     _pruneOldDetections();
-    
+
     if (state.queue.isEmpty) return;
-    
+
     final next = state.queue.first;
     final remaining = state.queue.sublist(1);
-    
+
     // Tune RX2 to collection frequency
     _ref.read(multiRxProvider.notifier).tuneRx2(next.freqMHz, next.bwMHz, null);
-    
+
     // Start collection
     final collection = CollectionStatus(
       entry: next,
       startedAt: DateTime.now(),
       durationSec: next.collectionDurationSec ?? _defaultCollectionDurationSec,
     );
-    
+
     state = state.copyWith(
       queue: remaining,
       currentCollection: collection,
       rx2Available: false,
     );
-    
+
     debugPrint('🎯 RX2 collecting: ${next.className} @ ${next.freqMHz} MHz for ${collection.durationSec}s');
-    
+
     // Start collection timer (simulated for now)
     _simulateCollection(collection);
   }
-  
+
   /// Simulate collection completion (replace with real IQ capture in production)
   Future<void> _simulateCollection(CollectionStatus collection) async {
     final durationSec = collection.durationSec;
-    
+
     // Update progress periodically
     for (int i = 0; i < durationSec; i++) {
       await Future.delayed(const Duration(seconds: 1));
-      
+
       if (state.currentCollection == null) {
         debugPrint('🎯 Collection cancelled');
         return;
       }
-      
+
       final progress = (i + 1) / durationSec;
       state = state.copyWith(
         currentCollection: CollectionStatus(
@@ -282,50 +282,50 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
         ),
       );
     }
-    
+
     // Collection complete
     onCollectionComplete();
   }
-  
+
   /// Called when RX2 collection completes
   void onCollectionComplete() {
     if (state.currentCollection != null) {
       debugPrint('🎯 Collection complete: ${state.currentCollection!.entry.className}');
     }
-    
+
     state = state.copyWith(
       clearCurrentCollection: true,
       rx2Available: true,
       totalCollected: state.totalCollected + 1,
     );
-    
+
     // Return RX2 to saved state
     _ref.read(multiRxProvider.notifier).rx2ResumeToSaved();
-    
+
     // Start next in queue
     _tryStartNextCollection();
   }
-  
+
   /// Cancel current collection
   void cancelCurrentCollection() {
     if (state.currentCollection == null) return;
-    
+
     debugPrint('🎯 Cancelling collection: ${state.currentCollection!.entry.className}');
-    
+
     state = state.copyWith(
       clearCurrentCollection: true,
       rx2Available: true,
     );
-    
+
     _ref.read(multiRxProvider.notifier).rx2ResumeToSaved();
     _tryStartNextCollection();
   }
-  
+
   /// Remove old detections from queue
   void _pruneOldDetections() {
     final cutoff = DateTime.now().subtract(Duration(minutes: _maxAgeMinutes));
     final oldCount = state.queue.where((e) => e.detectedAt.isBefore(cutoff)).length;
-    
+
     if (oldCount > 0) {
       final newQueue = state.queue.where((e) => e.detectedAt.isAfter(cutoff)).toList();
       state = state.copyWith(
@@ -335,7 +335,7 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
       debugPrint('🎯 Pruned $oldCount aged-out detections');
     }
   }
-  
+
   /// Clear all queued detections
   void clearQueue() {
     state = state.copyWith(
@@ -344,7 +344,7 @@ class DetectionQueueNotifier extends StateNotifier<DetectionQueueState> {
     );
     debugPrint('🎯 Queue cleared');
   }
-  
+
   /// Skip to next in queue (cancel current, start next)
   void skipToNext() {
     cancelCurrentCollection();

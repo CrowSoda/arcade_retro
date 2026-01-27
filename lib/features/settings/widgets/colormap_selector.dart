@@ -1,5 +1,5 @@
 /// Colormap Selector Widget
-/// 
+///
 /// Allows user to select color palette for waterfall display
 /// Sends command to backend which switches the LUT
 library;
@@ -16,10 +16,10 @@ class ColormapSelector extends ConsumerWidget {
 
   void _setColormap(WidgetRef ref, int newColormap) {
     debugPrint('[Settings] Colormap changed: ${colormapNames[newColormap]}');
-    
+
     // Update provider state
     ref.read(waterfallColormapProvider.notifier).state = newColormap;
-    
+
     // Send to backend
     ref.read(videoStreamProvider.notifier).setColormap(newColormap);
   }
@@ -59,8 +59,8 @@ class ColormapSelector extends ConsumerWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
-                      color: isSelected 
-                          ? G20Colors.primary.withOpacity(0.2) 
+                      color: isSelected
+                          ? G20Colors.primary.withOpacity(0.2)
                           : G20Colors.cardDark,
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(

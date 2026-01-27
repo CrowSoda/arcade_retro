@@ -1,5 +1,5 @@
 /// FFT Size Selector Widget
-/// 
+///
 /// Allows user to select FFT resolution for waterfall processing
 /// GPU-accelerated with cuFFT kernel warmup on change
 library;
@@ -18,10 +18,10 @@ class FftSizeSelector extends ConsumerWidget {
 
   Future<void> _setFftSize(WidgetRef ref, int newSize) async {
     debugPrint('[Settings] FFT size button tapped: $newSize');
-    
+
     // Update provider state
     ref.read(waterfallFftSizeProvider.notifier).state = newSize;
-    
+
     // Save to SharedPreferences for persistence
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -30,7 +30,7 @@ class FftSizeSelector extends ConsumerWidget {
     } catch (e) {
       debugPrint('[Settings] Failed to save FFT size: $e');
     }
-    
+
     // Send to backend (includes cuFFT warmup - may take 100-500ms)
     ref.read(videoStreamProvider.notifier).setFftSize(newSize);
   }
@@ -221,8 +221,8 @@ class _FftSizeOption extends StatelessWidget {
             Text(
               sublabel,
               style: TextStyle(
-                color: selected 
-                    ? G20Colors.primary.withOpacity(0.7) 
+                color: selected
+                    ? G20Colors.primary.withOpacity(0.7)
                     : G20Colors.textSecondaryDark,
                 fontSize: 10,
               ),

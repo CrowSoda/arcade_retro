@@ -33,7 +33,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     // Listen to capture state changes and update RX-2 accordingly
     ref.listen<ManualCaptureState>(manualCaptureProvider, (prev, next) {
       final multiRxNotifier = ref.read(multiRxProvider.notifier);
-      
+
       if (next.phase == CapturePhase.capturing && prev?.phase != CapturePhase.capturing) {
         // Capture started - update RX-2 to manual mode with capture frequency
         final freqMHz = double.tryParse(next.targetFreqMHz ?? '825.0') ?? 825.0;
@@ -45,7 +45,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         debugPrint('[RX] RX-2 returned to idle');
       }
     });
-    
+
     final selectedIndex = ref.watch(navigationIndexProvider);
 
     return Scaffold(
@@ -191,7 +191,7 @@ class _RecordingIndicatorState extends ConsumerState<_RecordingIndicator>
   @override
   Widget build(BuildContext context) {
     final captureState = ref.watch(manualCaptureProvider);
-    
+
     // Only show when actively capturing
     if (captureState.phase != CapturePhase.capturing) {
       return const SizedBox.shrink();
@@ -307,7 +307,7 @@ class _FrequencyStatusWidget extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final rxState = ref.watch(multiRxProvider);
     final connectedChannels = rxState.connectedChannels;
-    
+
     if (connectedChannels.isEmpty) {
       return _SingleRxCard(
         rxNumber: 0,
@@ -460,16 +460,16 @@ class _ConnectionIndicator extends ConsumerWidget {
     // Check both backend launcher and video stream connection
     final backendState = ref.watch(backendLauncherProvider);
     final videoState = ref.watch(videoStreamProvider);
-    
+
     // Connected if backend is running (has wsPort) AND video stream is connected
     final isConnected = backendState.wsPort != null && videoState.isConnected;
     final isPartial = backendState.wsPort != null && !videoState.isConnected;
 
-    final color = isConnected ? G20Colors.success 
-        : isPartial ? G20Colors.warning 
+    final color = isConnected ? G20Colors.success
+        : isPartial ? G20Colors.warning
         : G20Colors.error;
-    
-    final message = isConnected ? 'Connected to backend' 
+
+    final message = isConnected ? 'Connected to backend'
         : isPartial ? 'Backend running, stream disconnected'
         : 'Disconnected';
 

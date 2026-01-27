@@ -21,7 +21,7 @@ class LabelBox {
   String className;
   final int id;
   bool isSelected;
-  
+
   // Frequency/time bounds in real units
   double? freqStartMHz;
   double? freqEndMHz;
@@ -47,7 +47,7 @@ class LabelBox {
     final bottom = math.max(y1, y2) * size.height;
     return Rect.fromLTRB(left, top, right, bottom);
   }
-  
+
   LabelBox copyWith({
     double? x1, double? y1, double? x2, double? y2,
     String? className, bool? isSelected,
@@ -101,52 +101,52 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
   Float32List? _spectrogramData;
   int _spectrogramWidth = 0;  // Time dimension
   int _spectrogramHeight = 0; // Frequency dimension
-  
+
   // Full file bounds (set once on load)
   double _totalDurationSec = 0;
   double _totalBandwidthHz = 20e6;
   double _centerFreqHz = 0;
   double _sampleRate = 20e6;
-  
+
   // ZOOM VIEW BOUNDS (these change with zoom)
   double _viewTimeStartSec = 0.0;
   double _viewTimeEndSec = 0.2;
   double _viewFreqStartHz = 0.0;  // Relative to center freq (-BW/2 to +BW/2)
   double _viewFreqEndHz = 20e6;   // Full bandwidth initially
-  
+
   // For gesture scaling
   double _baseTimeSpan = 0.2;
   double _baseFreqSpan = 20e6;
   Offset _lastFocalPoint = Offset.zero;
-  
+
   // FFT size for display
   int _fftSize = 2048;
-  
+
   bool _isLoading = false;
   String? _error;
-  
+
   // Drawing state
   bool _isDrawing = false;
   Offset? _drawStart;
   Offset? _drawCurrent;
-  
+
   // Debounce timer for zoom recomputation
   Timer? _zoomDebounceTimer;
-  
+
   // Raw IQ data cache for zoom recomputation
   Float32List? _cachedIqData;
   int _cachedOffsetSamples = 0;
   int _cachedNumSamples = 0;
-  
+
   // FFT objects
   late FFT _fft;
   late Float64List _window;
-  
+
   // Backward compatibility getters (map old names to new zoom vars)
   double get _windowStartSec => _viewTimeStartSec;
   double get _windowLengthSec => _viewTimeEndSec - _viewTimeStartSec;
   int get _windowFftSize => _fftSize;
-  
+
   // Auto-detect params
   static const double _detectionThreshold = 10.0;  // dB above noise
   static const int _localWindowSize = 50;  // Size of local window for Otsu
@@ -173,7 +173,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     for (int i = 0; i < _fftSize; i++) {
       _window[i] = 0.5 * (1.0 - math.cos(2.0 * math.pi * i / (_fftSize - 1)));
     }
-    
+
     if (widget.filepath != null) {
       _loadAndCompute();
     }
@@ -181,7 +181,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
 
   Future<void> _loadAndCompute() async {
     if (widget.filepath == null) return;
-    
+
     // Don't clear the image - keep showing old one until new one is ready
     setState(() {
       _isLoading = true;
@@ -198,12 +198,12 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         });
         return;
       }
-      
+
       _sampleRate = header.sampleRate;
       _totalDurationSec = header.numSamples / _sampleRate;
       _totalBandwidthHz = header.bandwidthHz;
       _centerFreqHz = header.centerFreqHz;
-      
+
       // Initialize view bounds if first load
       if (_viewTimeEndSec <= _viewTimeStartSec) {
         _viewTimeStartSec = 0.0;
@@ -211,19 +211,19 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         _viewFreqStartHz = -_totalBandwidthHz / 2;
         _viewFreqEndHz = _totalBandwidthHz / 2;
       }
-      
+
       // Clamp view bounds
       _viewTimeStartSec = _viewTimeStartSec.clamp(0.0, _totalDurationSec);
       _viewTimeEndSec = _viewTimeEndSec.clamp(_viewTimeStartSec + 0.001, _totalDurationSec);
-      
+
       // Calculate time window to load
       final timeWindowSec = _viewTimeEndSec - _viewTimeStartSec;
       final offsetSamples = (_viewTimeStartSec * _sampleRate).toInt();
       final numSamples = (timeWindowSec * _sampleRate).toInt();
-      
+
       debugPrint('Loading window: ${_viewTimeStartSec.toStringAsFixed(3)}s to ${_viewTimeEndSec.toStringAsFixed(3)}s '
           '($numSamples samples at offset $offsetSamples)');
-      
+
       // Load only the window of IQ data
       final iqData = await RfcapService.readIqData(
         widget.filepath!,
@@ -240,15 +240,15 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       }
 
       debugPrint('Loaded ${iqData.length ~/ 2} complex samples');
-      
+
       // Cache for zoom recomputation
       _cachedIqData = iqData;
       _cachedOffsetSamples = offsetSamples;
       _cachedNumSamples = numSamples;
-      
+
       // Compute spectrogram with frequency zoom (heterodyne + decimate)
       await _computeZoomSpectrogram(iqData);
-      
+
       setState(() => _isLoading = false);
     } catch (e) {
       debugPrint('Error in _loadAndCompute: $e');
@@ -258,42 +258,42 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       });
     }
   }
-  
+
   /// Compute spectrogram - ZOOM DISABLED to fix bounding box issues
   Future<void> _computeZoomSpectrogram(Float32List iqData) async {
     // ZOOM FFT DISABLED - just compute straight spectrogram
     // TODO: Re-implement zoom properly without breaking box addressing
     await _computeSpectrogram(iqData, _fftSize);
   }
-  
+
   /// Heterodyne: mix signal to shift centerFreqHz to DC
   Float32List _heterodyne(Float32List iqData, double shiftHz, double sampleRate) {
     final numSamples = iqData.length ~/ 2;
     final result = Float32List(iqData.length);
     final twoPiOverSr = -2.0 * math.pi * shiftHz / sampleRate;
-    
+
     for (int i = 0; i < numSamples; i++) {
       final phase = twoPiOverSr * i;
       final cos = math.cos(phase);
       final sin = math.sin(phase);
-      
+
       final iVal = iqData[i * 2];
       final qVal = iqData[i * 2 + 1];
-      
+
       // Complex multiply: (I + jQ) * (cos - j*sin) = (I*cos + Q*sin) + j(Q*cos - I*sin)
       result[i * 2] = (iVal * cos + qVal * sin).toDouble();
       result[i * 2 + 1] = (qVal * cos - iVal * sin).toDouble();
     }
-    
+
     return result;
   }
-  
+
   /// Decimate with simple moving average lowpass filter
   Float32List _decimateWithFilter(Float32List iqData, int factor) {
     final numInputSamples = iqData.length ~/ 2;
     final numOutputSamples = numInputSamples ~/ factor;
     final result = Float32List(numOutputSamples * 2);
-    
+
     // Simple box filter (moving average) for anti-aliasing
     for (int i = 0; i < numOutputSamples; i++) {
       double sumI = 0, sumQ = 0;
@@ -307,7 +307,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       result[i * 2] = sumI / factor;
       result[i * 2 + 1] = sumQ / factor;
     }
-    
+
     return result;
   }
 
@@ -316,45 +316,45 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     final numComplexSamples = iqData.length ~/ 2;
     final hopSize = fftSize ~/ 4;  // 75% overlap
     final numTimeFrames = (numComplexSamples - fftSize) ~/ hopSize;
-    
+
     if (numTimeFrames <= 0) {
       setState(() => _error = 'Not enough data for spectrogram');
       return;
     }
-    
+
     // Create FFT and window for the specified size
     final fft = FFT(fftSize);
     final window = Float64List(fftSize);
     for (int i = 0; i < fftSize; i++) {
       window[i] = 0.5 * (1.0 - math.cos(2.0 * math.pi * i / (fftSize - 1)));
     }
-    
+
     // FreqHunter style: width = time, height = frequency
     _spectrogramWidth = numTimeFrames;
     _spectrogramHeight = fftSize ~/ 2;  // Only positive frequencies
     _spectrogramData = Float32List(_spectrogramWidth * _spectrogramHeight);
-    
+
     final fftIn = Float64x2List(fftSize);
-    
+
     // ASYNC: Process in chunks to keep UI responsive
     const chunkSize = 50;  // Process 50 frames, then yield to UI
-    
+
     for (int timeFrame = 0; timeFrame < numTimeFrames; timeFrame++) {
       final sampleOffset = timeFrame * hopSize;
-      
+
       // Window and load
       for (int i = 0; i < fftSize; i++) {
         final idx = (sampleOffset + i) * 2;
         if (idx + 1 >= iqData.length) break;
-        
+
         final iVal = iqData[idx];
         final qVal = iqData[idx + 1];
         fftIn[i] = Float64x2(iVal * window[i], qVal * window[i]);
       }
-      
+
       // FFT
       fft.inPlaceFft(fftIn);
-      
+
       // Power spectrum - store as column (frequency vertical)
       // Frequency increases from bottom to top
       for (int freqBin = 0; freqBin < _spectrogramHeight; freqBin++) {
@@ -364,27 +364,27 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         final imag = fftIn[fftBin].y;
         final power = real * real + imag * imag;
         final dB = 10.0 * math.log(power + 1e-12) / math.ln10;
-        
+
         // Row = frequency (inverted so high freq at top)
         // Col = time
         final row = _spectrogramHeight - 1 - freqBin;
         _spectrogramData![row * _spectrogramWidth + timeFrame] = dB;
       }
-      
+
       // ASYNC: Yield to UI every chunkSize frames to prevent freezing
       if (timeFrame % chunkSize == 0 && timeFrame > 0) {
         await Future.delayed(Duration.zero);
       }
     }
-    
+
     await _renderToImage();
   }
 
   Future<void> _renderToImage() async {
     if (_spectrogramData == null) return;
-    
+
     _pixelBuffer = Uint8List(_spectrogramWidth * _spectrogramHeight * 4);
-    
+
     // Find dynamic range
     double minDb = double.infinity;
     double maxDb = double.negativeInfinity;
@@ -394,17 +394,17 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         if (v > maxDb) maxDb = v;
       }
     }
-    
+
     // Noise floor estimation (10th percentile)
     final sorted = List<double>.from(_spectrogramData!.where((v) => v.isFinite));
     sorted.sort();
     final noiseFloor = sorted.isNotEmpty ? sorted[sorted.length ~/ 10] : minDb;
-    
+
     // Display range: noise floor - 5dB to noise floor + 50dB
     final displayMin = noiseFloor - 5;
     final displayMax = noiseFloor + 50;
     final dbRange = displayMax - displayMin;
-    
+
     // Render pixels
     for (int row = 0; row < _spectrogramHeight; row++) {
       for (int col = 0; col < _spectrogramWidth; col++) {
@@ -413,7 +413,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         final normalized = ((value - displayMin) / dbRange).clamp(0.0, 1.0);
         final colorIdx = (normalized * 255).round().clamp(0, 255);
         final rgb = viridisLut[colorIdx];
-        
+
         final pixelIdx = idx * 4;
         _pixelBuffer![pixelIdx] = rgb[0];
         _pixelBuffer![pixelIdx + 1] = rgb[1];
@@ -421,7 +421,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         _pixelBuffer![pixelIdx + 3] = 255;
       }
     }
-    
+
     // Decode to image
     ui.decodeImageFromPixels(
       _pixelBuffer!,
@@ -445,32 +445,32 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
   /// 2. Adaptive seeded region growing
   /// 3. Morphological close/open refinement
   /// 4. Chan-Vese level set fallback for difficult signals
-  /// 
+  ///
   /// Includes 2s timeout and error handling with logging.
   void _autoDetect(Offset localPosition, Size size) {
     if (_spectrogramData == null) return;
-    
+
     final stopwatch = Stopwatch()..start();
     const timeoutMs = 2000;  // 2 second timeout
-    
+
     try {
       // Convert to spectrogram coordinates
       final col = (localPosition.dx / size.width * _spectrogramWidth).round().clamp(0, _spectrogramWidth - 1);
       final row = (localPosition.dy / size.height * _spectrogramHeight).round().clamp(0, _spectrogramHeight - 1);
-      
+
       // Stage 1: Extract local window and compute Otsu threshold
       final localStats = _computeLocalStats(col, row, _localWindowSize);
       final otsuThreshold = _computeLocalOtsu(col, row, _localWindowSize);
-      
+
       if (stopwatch.elapsedMilliseconds > timeoutMs) {
         _log.warn('Auto-detect timeout at stage 1 (Otsu)', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
         _createBoxAt(localPosition, size, 0.03, 0.05);
         return;
       }
-      
+
       // Get power at tap point
       final centerPower = _spectrogramData![row * _spectrogramWidth + col];
-      
+
       // Check if there's signal above local Otsu threshold
       if (centerPower < otsuThreshold) {
         // No significant energy - create small default box
@@ -478,29 +478,29 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         _createBoxAt(localPosition, size, 0.03, 0.05);
         return;
       }
-      
+
       // Stage 2: Adaptive seeded region growing
       final mask = _adaptiveRegionGrow(col, row, otsuThreshold, localStats['stddev']!);
-      
+
       if (stopwatch.elapsedMilliseconds > timeoutMs) {
         _log.warn('Auto-detect timeout at stage 2 (region grow)', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
         _createBoxAt(localPosition, size, 0.03, 0.05);
         return;
       }
-      
+
       // Stage 3: Morphological refinement (close then open)
       _morphClose(mask, 3);
       _morphOpen(mask, 2);
-      
+
       if (stopwatch.elapsedMilliseconds > timeoutMs) {
         _log.warn('Auto-detect timeout at stage 3 (morphology)', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
         _createBoxAt(localPosition, size, 0.03, 0.05);
         return;
       }
-      
+
       // Extract bounding box from mask
       var bbox = _extractBoundingBox(mask);
-      
+
       // Stage 4: If result is unreasonable, try Chan-Vese fallback
       if (bbox == null || _isUnreasonableBox(bbox)) {
         if (stopwatch.elapsedMilliseconds > timeoutMs) {
@@ -508,26 +508,26 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
           _createBoxAt(localPosition, size, 0.03, 0.05);
           return;
         }
-        
+
         _log.debug('Primary detection failed, trying Chan-Vese fallback');
         final chanVeseMask = _chanVeseLevelSet(col, row);
         if (chanVeseMask != null) {
           bbox = _extractBoundingBox(chanVeseMask);
         }
       }
-      
+
       if (stopwatch.elapsedMilliseconds > timeoutMs) {
         _log.warn('Auto-detect timeout after Chan-Vese', data: {'elapsed_ms': stopwatch.elapsedMilliseconds});
         _createBoxAt(localPosition, size, 0.03, 0.05);
         return;
       }
-      
+
       // If still no good result, fall back to simple flood fill
       if (bbox == null || _isUnreasonableBox(bbox)) {
         _log.debug('Fallback to simple flood fill');
         bbox = _simpleFloodFill(col, row, otsuThreshold * 0.8);
       }
-      
+
       // Create the box
       if (bbox != null) {
         // Add generous margin - better to be loose than tight for CNN training
@@ -536,18 +536,18 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         final boxHeight = bbox['row2']! - bbox['row1']!;
         final marginCol = math.max(8, (boxWidth * 0.15).round());
         final marginRow = math.max(8, (boxHeight * 0.15).round());
-        
+
         final col1 = (bbox['col1']! - marginCol).clamp(0, _spectrogramWidth - 1);
         final col2 = (bbox['col2']! + marginCol).clamp(0, _spectrogramWidth - 1);
         final row1 = (bbox['row1']! - marginRow).clamp(0, _spectrogramHeight - 1);
         final row2 = (bbox['row2']! + marginRow).clamp(0, _spectrogramHeight - 1);
-        
+
         _log.info('Auto-detect success', data: {
           'elapsed_ms': stopwatch.elapsedMilliseconds,
           'box_width': col2 - col1,
           'box_height': row2 - row1,
         });
-        
+
         _createBox(
           col1 / _spectrogramWidth,
           row1 / _spectrogramHeight,
@@ -567,25 +567,25 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       stopwatch.stop();
     }
   }
-  
+
   /// Compute local statistics around click point
   Map<String, double> _computeLocalStats(int col, int row, int windowSize) {
     final halfW = windowSize ~/ 2;
     final values = <double>[];
-    
+
     for (int r = math.max(0, row - halfW); r < math.min(_spectrogramHeight, row + halfW); r++) {
       for (int c = math.max(0, col - halfW); c < math.min(_spectrogramWidth, col + halfW); c++) {
         final val = _spectrogramData![r * _spectrogramWidth + c];
         if (val.isFinite) values.add(val);
       }
     }
-    
+
     if (values.isEmpty) return {'mean': 0, 'stddev': 1, 'min': 0, 'max': 0};
-    
+
     final mean = values.reduce((a, b) => a + b) / values.length;
     final variance = values.map((v) => (v - mean) * (v - mean)).reduce((a, b) => a + b) / values.length;
     final stddev = math.sqrt(variance);
-    
+
     values.sort();
     return {
       'mean': mean,
@@ -595,131 +595,131 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       'median': values[values.length ~/ 2],
     };
   }
-  
+
   /// Compute Otsu threshold on local window
   double _computeLocalOtsu(int col, int row, int windowSize) {
     final halfW = windowSize ~/ 2;
     final values = <double>[];
-    
+
     for (int r = math.max(0, row - halfW); r < math.min(_spectrogramHeight, row + halfW); r++) {
       for (int c = math.max(0, col - halfW); c < math.min(_spectrogramWidth, col + halfW); c++) {
         final val = _spectrogramData![r * _spectrogramWidth + c];
         if (val.isFinite) values.add(val);
       }
     }
-    
+
     if (values.isEmpty) return 0;
-    
+
     // Build histogram (256 bins)
     values.sort();
     final minVal = values.first;
     final maxVal = values.last;
     final range = maxVal - minVal;
     if (range <= 0) return minVal;
-    
+
     const numBins = 256;
     final histogram = List.filled(numBins, 0);
     for (final v in values) {
       final bin = ((v - minVal) / range * (numBins - 1)).round().clamp(0, numBins - 1);
       histogram[bin]++;
     }
-    
+
     // Otsu's method - find threshold that maximizes between-class variance
     final total = values.length;
     double sumTotal = 0;
     for (int i = 0; i < numBins; i++) {
       sumTotal += i * histogram[i];
     }
-    
+
     double sumB = 0;
     int wB = 0;
     double maxVariance = 0;
     int threshold = 0;
-    
+
     for (int t = 0; t < numBins; t++) {
       wB += histogram[t];
       if (wB == 0) continue;
-      
+
       final wF = total - wB;
       if (wF == 0) break;
-      
+
       sumB += t * histogram[t];
-      
+
       final mB = sumB / wB;
       final mF = (sumTotal - sumB) / wF;
-      
+
       final variance = wB * wF * (mB - mF) * (mB - mF);
       if (variance > maxVariance) {
         maxVariance = variance;
         threshold = t;
       }
     }
-    
+
     return minVal + (threshold / (numBins - 1)) * range;
   }
-  
+
   /// Adaptive seeded region growing
   List<List<bool>> _adaptiveRegionGrow(int seedCol, int seedRow, double threshold, double localStddev) {
     final mask = List.generate(_spectrogramHeight, (_) => List.filled(_spectrogramWidth, false));
     final visited = List.generate(_spectrogramHeight, (_) => List.filled(_spectrogramWidth, false));
-    
+
     final seedValue = _spectrogramData![seedRow * _spectrogramWidth + seedCol];
     double regionMean = seedValue;
     int regionCount = 1;
     final tolerance = localStddev * _regionGrowK;
-    
+
     // BFS queue: [row, col]
     final queue = <List<int>>[[seedRow, seedCol]];
     mask[seedRow][seedCol] = true;
     visited[seedRow][seedCol] = true;
-    
+
     while (queue.isNotEmpty) {
       final current = queue.removeAt(0);
       final r = current[0];
       final c = current[1];
-      
+
       // Check 4-connected neighbors
       for (final delta in [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
         final nr = r + delta[0];
         final nc = c + delta[1];
-        
+
         if (nr < 0 || nr >= _spectrogramHeight || nc < 0 || nc >= _spectrogramWidth) continue;
         if (visited[nr][nc]) continue;
-        
+
         visited[nr][nc] = true;
         final val = _spectrogramData![nr * _spectrogramWidth + nc];
-        
+
         // Similarity criterion: above threshold AND similar to region mean
         if (val >= threshold && (val - regionMean).abs() < tolerance) {
           mask[nr][nc] = true;
           queue.add([nr, nc]);
-          
+
           // Update running mean
           regionCount++;
           regionMean += (val - regionMean) / regionCount;
         }
       }
     }
-    
+
     return mask;
   }
-  
+
   /// Morphological closing (dilate then erode)
   void _morphClose(List<List<bool>> mask, int kernelSize) {
     _dilate(mask, kernelSize);
     _erode(mask, kernelSize);
   }
-  
+
   /// Morphological opening (erode then dilate)
   void _morphOpen(List<List<bool>> mask, int kernelSize) {
     _erode(mask, kernelSize);
     _dilate(mask, kernelSize);
   }
-  
+
   void _dilate(List<List<bool>> mask, int kernelSize) {
     final half = kernelSize ~/ 2;
     final copy = List.generate(_spectrogramHeight, (r) => List<bool>.from(mask[r]));
-    
+
     for (int r = 0; r < _spectrogramHeight; r++) {
       for (int c = 0; c < _spectrogramWidth; c++) {
         if (!copy[r][c]) continue;
@@ -736,11 +736,11 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       }
     }
   }
-  
+
   void _erode(List<List<bool>> mask, int kernelSize) {
     final half = kernelSize ~/ 2;
     final copy = List.generate(_spectrogramHeight, (r) => List<bool>.from(mask[r]));
-    
+
     for (int r = 0; r < _spectrogramHeight; r++) {
       for (int c = 0; c < _spectrogramWidth; c++) {
         if (!copy[r][c]) continue;
@@ -759,13 +759,13 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       }
     }
   }
-  
+
   /// Extract bounding box from binary mask
   Map<String, int>? _extractBoundingBox(List<List<bool>> mask) {
     int minRow = _spectrogramHeight, maxRow = 0;
     int minCol = _spectrogramWidth, maxCol = 0;
     bool found = false;
-    
+
     for (int r = 0; r < _spectrogramHeight; r++) {
       for (int c = 0; c < _spectrogramWidth; c++) {
         if (mask[r][c]) {
@@ -777,87 +777,87 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         }
       }
     }
-    
+
     if (!found) return null;
     return {'row1': minRow, 'row2': maxRow, 'col1': minCol, 'col2': maxCol};
   }
-  
+
   /// Check if bounding box is unreasonable (too small or too large)
   bool _isUnreasonableBox(Map<String, int> bbox) {
     final width = bbox['col2']! - bbox['col1']!;
     final height = bbox['row2']! - bbox['row1']!;
-    
+
     // Too small (less than 3 pixels)
     if (width < 3 || height < 3) return true;
-    
+
     // Too large (more than 80% of image)
     if (width > _spectrogramWidth * 0.8 || height > _spectrogramHeight * 0.8) return true;
-    
+
     return false;
   }
-  
+
   /// Simple flood fill fallback
   Map<String, int>? _simpleFloodFill(int seedCol, int seedRow, double threshold) {
     final visited = List.generate(_spectrogramHeight, (_) => List.filled(_spectrogramWidth, false));
-    
+
     int minRow = seedRow, maxRow = seedRow;
     int minCol = seedCol, maxCol = seedCol;
-    
+
     final queue = <List<int>>[[seedRow, seedCol]];
     visited[seedRow][seedCol] = true;
-    
+
     while (queue.isNotEmpty) {
       final current = queue.removeAt(0);
       final r = current[0];
       final c = current[1];
-      
+
       if (r < minRow) minRow = r;
       if (r > maxRow) maxRow = r;
       if (c < minCol) minCol = c;
       if (c > maxCol) maxCol = c;
-      
+
       for (final delta in [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
         final nr = r + delta[0];
         final nc = c + delta[1];
-        
+
         if (nr < 0 || nr >= _spectrogramHeight || nc < 0 || nc >= _spectrogramWidth) continue;
         if (visited[nr][nc]) continue;
-        
+
         visited[nr][nc] = true;
         final val = _spectrogramData![nr * _spectrogramWidth + nc];
-        
+
         if (val >= threshold) {
           queue.add([nr, nc]);
         }
       }
     }
-    
+
     return {'row1': minRow, 'row2': maxRow, 'col1': minCol, 'col2': maxCol};
   }
-  
+
   /// Chan-Vese level set segmentation - fallback for difficult signals
   /// Simplified implementation that evolves a contour to minimize energy
   List<List<bool>>? _chanVeseLevelSet(int seedCol, int seedRow) {
     // Initialize level set as small circle around seed
-    final phi = List.generate(_spectrogramHeight, (r) => 
+    final phi = List.generate(_spectrogramHeight, (r) =>
       List.generate(_spectrogramWidth, (c) {
         final dist = math.sqrt(math.pow(r - seedRow, 2) + math.pow(c - seedCol, 2));
         return dist - 15.0;  // Circle of radius 15
       })
     );
-    
+
     // Parameters
     const mu = 0.1;      // Length penalty
-    const nu = 0.0;      // Area penalty  
+    const nu = 0.0;      // Area penalty
     const lambda1 = 1.0; // Inside fitting
     const lambda2 = 1.0; // Outside fitting
     const dt = 0.5;      // Time step
-    
+
     for (int iter = 0; iter < _chanVeseMaxIter; iter++) {
       // Compute inside/outside means
       double sumIn = 0, sumOut = 0;
       int countIn = 0, countOut = 0;
-      
+
       for (int r = 0; r < _spectrogramHeight; r++) {
         for (int c = 0; c < _spectrogramWidth; c++) {
           final val = _spectrogramData![r * _spectrogramWidth + c];
@@ -870,43 +870,43 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
           }
         }
       }
-      
+
       final c1 = countIn > 0 ? sumIn / countIn : 0;
       final c2 = countOut > 0 ? sumOut / countOut : 0;
-      
+
       // Update level set
       for (int r = 1; r < _spectrogramHeight - 1; r++) {
         for (int c = 1; c < _spectrogramWidth - 1; c++) {
           final val = _spectrogramData![r * _spectrogramWidth + c];
-          
+
           // Compute curvature (simplified)
           final dx = (phi[r][c + 1] - phi[r][c - 1]) / 2;
           final dy = (phi[r + 1][c] - phi[r - 1][c]) / 2;
           final dxx = phi[r][c + 1] - 2 * phi[r][c] + phi[r][c - 1];
           final dyy = phi[r + 1][c] - 2 * phi[r][c] + phi[r - 1][c];
-          
+
           final gradMag = math.sqrt(dx * dx + dy * dy + 1e-8);
           final curvature = (dxx + dyy) / gradMag;
-          
+
           // Chan-Vese force
           final f1 = (val - c1) * (val - c1);
           final f2 = (val - c2) * (val - c2);
           final force = mu * curvature - nu - lambda1 * f1 + lambda2 * f2;
-          
+
           // Dirac delta approximation
           final eps = 1.0;
           final dirac = eps / (math.pi * (eps * eps + phi[r][c] * phi[r][c]));
-          
+
           phi[r][c] += dt * dirac * force;
         }
       }
     }
-    
+
     // Convert level set to binary mask
-    final mask = List.generate(_spectrogramHeight, (r) => 
+    final mask = List.generate(_spectrogramHeight, (r) =>
       List.generate(_spectrogramWidth, (c) => phi[r][c] <= 0)
     );
-    
+
     return mask;
   }
 
@@ -925,7 +925,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     // Convert normalized coords to ABSOLUTE time (within current window)
     final absTimeStart = _windowStartSec + math.min(x1, x2) * _windowLengthSec;
     final absTimeEnd = _windowStartSec + math.max(x1, x2) * _windowLengthSec;
-    
+
     // Calculate frequency bounds
     // CRITICAL: Flutter's spectrogram only shows POSITIVE frequencies (DC to +fs/2)
     // because _spectrogramHeight = fftSize ~/ 2 (only half the spectrum).
@@ -939,7 +939,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       final cfHz = widget.header!.centerFreqHz;
       final freqMinHz = cfHz;  // DC (bottom of display)
       final freqRangeHz = sampleRateHz / 2;  // Only positive frequencies
-      
+
       // y=0 (top) = highest freq = cfHz + fs/2
       // y=1 (bottom) = lowest freq = cfHz (DC)
       // freq = freqMinHz + (1 - y) * freqRangeHz
@@ -947,7 +947,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       freqEndMHz = (freqMinHz + (1 - math.min(y1, y2)) * freqRangeHz) / 1e6;
       debugPrint('[_createBox] Positive freq only: range=${cfHz/1e6}-${(cfHz + freqRangeHz)/1e6}MHz, box=${freqStartMHz.toStringAsFixed(2)}-${freqEndMHz.toStringAsFixed(2)} MHz');
     }
-    
+
     final box = LabelBox(
       x1: x1, y1: y1, x2: x2, y2: y2,
       className: widget.header?.signalName ?? 'unknown',
@@ -957,7 +957,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       timeStartSec: absTimeStart,
       timeEndSec: absTimeEnd,
     );
-    
+
     widget.onBoxCreated?.call(box);
   }
 
@@ -967,22 +967,22 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     if (box.timeStartSec == null || box.timeEndSec == null) {
       return box.toRect(size);  // Fallback to normalized coords
     }
-    
+
     final windowEnd = _windowStartSec + _windowLengthSec;
-    
+
     // Check if box overlaps current window
     if (box.timeEndSec! < _windowStartSec || box.timeStartSec! > windowEnd) {
       return null;  // Box not visible
     }
-    
+
     // Convert absolute time to screen x coords
     final x1 = ((box.timeStartSec! - _windowStartSec) / _windowLengthSec).clamp(0.0, 1.0);
     final x2 = ((box.timeEndSec! - _windowStartSec) / _windowLengthSec).clamp(0.0, 1.0);
-    
+
     // Y coords stay the same (frequency doesn't change with panning)
     final y1 = math.min(box.y1, box.y2);
     final y2 = math.max(box.y1, box.y2);
-    
+
     return Rect.fromLTRB(
       x1 * size.width,
       y1 * size.height,
@@ -1014,17 +1014,17 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       setState(() => _isDrawing = false);
       return;
     }
-    
+
     final x1 = _drawStart!.dx / size.width;
     final y1 = _drawStart!.dy / size.height;
     final x2 = _drawCurrent!.dx / size.width;
     final y2 = _drawCurrent!.dy / size.height;
-    
+
     // Only create if box is big enough
     if ((x2 - x1).abs() > 0.01 && (y2 - y1).abs() > 0.01) {
       _createBox(x1, y1, x2, y2);
     }
-    
+
     setState(() {
       _isDrawing = false;
       _drawStart = null;
@@ -1046,21 +1046,21 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
   // Pending navigation - don't update until image is ready
   double? _pendingTimeStart;
   double? _pendingTimeEnd;
-  
+
   // Navigation methods - DEFERRED UPDATE: boxes stay in sync with image
   void _navigate(double deltaSec) {
     final currentLength = _viewTimeEndSec - _viewTimeStartSec;
     // Store pending values but DON'T update state yet
     _pendingTimeStart = (_viewTimeStartSec + deltaSec).clamp(0.0, math.max(0.0, _totalDurationSec - currentLength));
     _pendingTimeEnd = _pendingTimeStart! + currentLength;
-    
+
     // Show subtle loading indicator without changing window bounds
     setState(() => _isLoading = true);
-    
+
     // Load the new window - bounds will update when image is ready
     _loadAndComputeDeferred(_pendingTimeStart!, _pendingTimeEnd!);
   }
-  
+
   Future<void> _loadAndComputeDeferred(double newTimeStart, double newTimeEnd) async {
     if (widget.filepath == null) return;
 
@@ -1073,17 +1073,17 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         });
         return;
       }
-      
+
       _sampleRate = header.sampleRate;
       _totalDurationSec = header.numSamples / _sampleRate;
       _totalBandwidthHz = header.bandwidthHz;
       _centerFreqHz = header.centerFreqHz;
-      
+
       // Calculate time window to load
       final timeWindowSec = newTimeEnd - newTimeStart;
       final offsetSamples = (newTimeStart * _sampleRate).toInt();
       final numSamples = (timeWindowSec * _sampleRate).toInt();
-      
+
       // Load only the window of IQ data
       final iqData = await RfcapService.readIqData(
         widget.filepath!,
@@ -1103,10 +1103,10 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       _cachedIqData = iqData;
       _cachedOffsetSamples = offsetSamples;
       _cachedNumSamples = numSamples;
-      
+
       // Compute spectrogram
       await _computeZoomSpectrogram(iqData);
-      
+
       // NOW update bounds - image is ready, boxes will render in sync
       setState(() {
         _viewTimeStartSec = newTimeStart;
@@ -1143,16 +1143,16 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
     });
     _loadAndCompute();
   }
-  
+
   /// Zoom in/out centered on a point - this is the TRUE ZOOM method
   void _zoom(double zoomFactor, Offset? focalPoint, Size size) {
     final currentTimeSpan = _viewTimeEndSec - _viewTimeStartSec;
     final currentFreqSpan = _viewFreqEndHz - _viewFreqStartHz;
-    
+
     // Calculate new spans
     final newTimeSpan = (currentTimeSpan / zoomFactor).clamp(0.01, _totalDurationSec);
     final newFreqSpan = (currentFreqSpan / zoomFactor).clamp(100000.0, _totalBandwidthHz);
-    
+
     // Get focal point in data coordinates (default to center if null)
     double focalTimeSec, focalFreqHz;
     if (focalPoint != null) {
@@ -1165,22 +1165,22 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       focalTimeSec = (_viewTimeStartSec + _viewTimeEndSec) / 2;
       focalFreqHz = (_viewFreqStartHz + _viewFreqEndHz) / 2;
     }
-    
+
     // Recalculate bounds centered on focal point
     final newTimeStart = (focalTimeSec - newTimeSpan / 2).clamp(0.0, _totalDurationSec - newTimeSpan);
     final newTimeEnd = newTimeStart + newTimeSpan;
-    
+
     final halfBw = _totalBandwidthHz / 2;
     final newFreqStart = (focalFreqHz - newFreqSpan / 2).clamp(-halfBw, halfBw - newFreqSpan);
     final newFreqEnd = newFreqStart + newFreqSpan;
-    
+
     setState(() {
       _viewTimeStartSec = newTimeStart;
       _viewTimeEndSec = newTimeEnd;
       _viewFreqStartHz = newFreqStart;
       _viewFreqEndHz = newFreqEnd;
     });
-    
+
     // Debounce the recomputation
     _zoomDebounceTimer?.cancel();
     _zoomDebounceTimer = Timer(const Duration(milliseconds: 100), () {
@@ -1246,7 +1246,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
       return Container(
         color: G20Colors.cardDark,
         child: const Center(
-          child: Text('Select a file to view spectrogram', 
+          child: Text('Select a file to view spectrogram',
             style: TextStyle(color: G20Colors.textSecondaryDark)),
         ),
       );
@@ -1259,12 +1259,12 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
         const bottomMargin = 20.0;  // Time axis only (no slider)
         const topMargin = 4.0;
         const rightMargin = 4.0;
-        
+
         final plotRect = Rect.fromLTRB(
           leftMargin, topMargin,
           size.width - rightMargin, size.height - bottomMargin,
         );
-        
+
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -1366,7 +1366,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ),
           ),
           const SizedBox(height: 12),
-          
+
           // Navigation buttons - jump by window length
           const Text('Navigate', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 9)),
           const SizedBox(height: 2),
@@ -1388,7 +1388,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ],
           ),
           const SizedBox(height: 8),
-          
+
           // Window length selector
           const Text('Window', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 9)),
           const SizedBox(height: 2),
@@ -1404,7 +1404,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ],
           ),
           const SizedBox(height: 8),
-          
+
           // FFT Size selector
           const Text('FFT Size', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 9)),
           const SizedBox(height: 2),
@@ -1458,7 +1458,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ),
           ),
           const SizedBox(height: 12),
-          
+
           // Navigation buttons - MOBILE FRIENDLY (56px tall, color coded)
           // BACK = Orange, FORWARD = Green (double arrows brighter)
           Row(
@@ -1538,7 +1538,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ],
           ),
           const SizedBox(height: 16),
-          
+
           // Window length
           const Text('Window', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10)),
           const SizedBox(height: 4),
@@ -1550,7 +1550,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
           const SizedBox(height: 4),
           _VerticalOptionButton(label: '2.0s', isSelected: _windowLengthSec == 2.0, onPressed: () => _setWindowLength(2.0)),
           const SizedBox(height: 16),
-          
+
           // FFT Size
           const Text('FFT', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10)),
           const SizedBox(height: 4),
@@ -1600,10 +1600,10 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
               ],
             ),
           ),
-          
+
           // Spacer to push controls to right
           const Spacer(),
-          
+
           // Window length - RIGHT SIDE with 12px gaps
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1625,7 +1625,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ],
           ),
           const SizedBox(width: 24),
-          
+
           // FFT Size - RIGHT SIDE with 12px gaps
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1647,7 +1647,7 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
             ],
           ),
           const SizedBox(width: 24),
-          
+
           // Navigation buttons - FAR RIGHT for thumb access
           SizedBox(
             width: 56,
@@ -1769,7 +1769,7 @@ class _BoxWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final rect = box.toRect(size);
     final borderColor = box.isSelected ? G20Colors.primary : Colors.cyan;
-    
+
     return Positioned.fromRect(
       rect: rect,
       child: GestureDetector(
@@ -1851,7 +1851,7 @@ class _BoxWidgetAbsolute extends StatelessWidget {
   Widget build(BuildContext context) {
     // Use SOI color based on signal class name - consistent with live detection
     final soiColor = getSOIColor(box.className);
-    
+
     return Positioned.fromRect(
       rect: screenRect,
       child: GestureDetector(
@@ -1883,7 +1883,7 @@ class _DrawingBox extends StatelessWidget {
     final top = math.min(start.dy, current.dy);
     final width = (start.dx - current.dx).abs();
     final height = (start.dy - current.dy).abs();
-    
+
     return Positioned(
       left: left, top: top, width: width, height: height,
       child: Container(
@@ -1903,7 +1903,7 @@ class _FreqAxis extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (header == null) return const SizedBox();
-    
+
     // CRITICAL: Flutter spectrogram only shows POSITIVE frequencies (DC to +fs/2)
     // because _spectrogramHeight = fftSize ~/ 2.
     // Displayed range: centerFreq (DC/bottom) to centerFreq + sampleRate/2 (top)
@@ -1911,7 +1911,7 @@ class _FreqAxis extends StatelessWidget {
     final low = header!.centerFreqMHz;  // DC is at bottom
     final high = header!.centerFreqMHz + halfBwMHz;  // +Nyquist is at top
     final mid = header!.centerFreqMHz + halfBwMHz / 2;
-    
+
     return Container(
       padding: const EdgeInsets.only(right: 4),
       child: Column(
@@ -1957,7 +1957,7 @@ class _TimeAxisWindowed extends StatelessWidget {
   Widget build(BuildContext context) {
     final endSec = windowStartSec + windowLengthSec;
     final midSec = windowStartSec + windowLengthSec / 2;
-    
+
     return Container(
       padding: const EdgeInsets.only(top: 4),
       child: Row(
@@ -1976,7 +1976,7 @@ class _TimeAxisWindowed extends StatelessWidget {
 class _NavButtonSmall extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
-  
+
   const _NavButtonSmall({required this.label, required this.onPressed});
 
   @override
@@ -2004,7 +2004,7 @@ class _OptionButtonSmall extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onPressed;
-  
+
   const _OptionButtonSmall({
     required this.label,
     required this.isSelected,
@@ -2042,7 +2042,7 @@ class _VerticalOptionButton extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onPressed;
-  
+
   const _VerticalOptionButton({
     required this.label,
     required this.isSelected,
@@ -2079,7 +2079,7 @@ class _PositionSlider extends StatelessWidget {
   final double windowLengthSec;
   final double totalDurationSec;
   final ValueChanged<double> onChanged;
-  
+
   const _PositionSlider({
     required this.windowStartSec,
     required this.windowLengthSec,
@@ -2090,12 +2090,12 @@ class _PositionSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (totalDurationSec <= 0) return const SizedBox();
-    
+
     // Calculate divisions - snap to half-window increments
     final stepSize = windowLengthSec / 2;
     final divisions = math.max(1, (totalDurationSec / stepSize).floor());
     final maxValue = math.max(0.0, totalDurationSec - windowLengthSec);
-    
+
     return SliderTheme(
       data: SliderThemeData(
         trackHeight: 6,

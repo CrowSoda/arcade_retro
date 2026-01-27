@@ -42,10 +42,10 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
 
   Future<void> _loadModels() async {
     setState(() => _loadingModels = true);
-    
+
     final models = <ModelInfo>[];
     final modelsDir = Directory('models');
-    
+
     if (await modelsDir.exists()) {
       await for (final entity in modelsDir.list()) {
         if (entity is File) {
@@ -63,10 +63,10 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
         }
       }
     }
-    
+
     // Sort by modified date (newest first)
     models.sort((a, b) => b.modified.compareTo(a.modified));
-    
+
     setState(() {
       _models = models;
       _loadingModels = false;
@@ -223,7 +223,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
               ],
             ),
             const SizedBox(height: 16),
-            
+
             // Tab content
             Expanded(
               child: TabBarView(
@@ -273,7 +273,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
           ],
         ),
         const SizedBox(height: 12),
-        
+
         // Table header
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -294,7 +294,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
             ],
           ),
         ),
-        
+
         // Table body
         Expanded(
           child: Container(
@@ -393,7 +393,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
             ),
           ),
         ),
-        
+
         // Footer info
         Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -465,7 +465,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
             ],
           ),
         ),
-        
+
         // Table body
         Expanded(
           child: Container(
@@ -555,7 +555,7 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
             ),
           ),
         ),
-        
+
         // Footer info
         Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -716,11 +716,11 @@ class _EditSignalDialogState extends State<_EditSignalDialog> {
               ],
             ),
             const SizedBox(height: 20),
-            
+
             // Form fields
             _buildTextField('Name', _nameController),
             const SizedBox(height: 12),
-            
+
             // Mod Type dropdown
             const Text('Mod Type', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12)),
             const SizedBox(height: 4),
@@ -733,7 +733,7 @@ class _EditSignalDialogState extends State<_EditSignalDialog> {
               onChanged: (v) => setState(() => _selectedModType = v ?? '--'),
             ),
             const SizedBox(height: 12),
-            
+
             Row(
               children: [
                 Expanded(child: _buildTextField('Mod Rate (sps)', _modRateController, isNumber: true)),
@@ -742,10 +742,10 @@ class _EditSignalDialogState extends State<_EditSignalDialog> {
               ],
             ),
             const SizedBox(height: 12),
-            
+
             _buildTextField('Notes', _notesController, maxLines: 2),
             const SizedBox(height: 20),
-            
+
             // Stats (read-only)
             Container(
               padding: const EdgeInsets.all(12),
@@ -763,7 +763,7 @@ class _EditSignalDialogState extends State<_EditSignalDialog> {
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.end,

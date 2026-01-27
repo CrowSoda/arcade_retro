@@ -13,15 +13,15 @@ service DeviceControl {
   rpc SetFrequency(FrequencyRequest) returns (FrequencyResponse);
   rpc SetBandwidth(BandwidthRequest) returns (BandwidthResponse);
   rpc SetGain(GainRequest) returns (GainResponse);
-  
+
   // Capture commands
   rpc StartCapture(CaptureRequest) returns (CaptureResponse);
   rpc StopCapture(StopRequest) returns (StopResponse);
-  
+
   // Status
   rpc GetStatus(StatusRequest) returns (StatusResponse);
   rpc GetDeviceInfo(DeviceInfoRequest) returns (DeviceInfoResponse);
-  
+
   // Mode control
   rpc SetMode(ModeRequest) returns (ModeResponse);
 }

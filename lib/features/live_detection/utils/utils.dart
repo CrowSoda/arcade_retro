@@ -1,5 +1,5 @@
 /// Live Detection Utils - Barrel export
-/// 
+///
 /// Export all utilities for easy import
 library;
 

@@ -1,11 +1,11 @@
 /// Error Boundary Widget - Catches and displays widget tree errors gracefully
-/// 
+///
 /// Features:
 /// - Catches errors in child widget tree
 /// - Logs errors with stack traces
 /// - Shows fallback UI with retry option
 /// - Reports errors to logging system
-/// 
+///
 /// Usage:
 ///   ErrorBoundary(
 ///     module: 'VideoStream',

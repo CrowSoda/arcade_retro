@@ -1,12 +1,12 @@
 /// G20 Logger - Unified logging utility with levels and filtering
-/// 
+///
 /// Usage:
 ///   G20Log.d('VideoStream', 'Connected to backend');  // Debug
-///   G20Log.i('Scanner', 'Loaded mission');            // Info  
+///   G20Log.i('Scanner', 'Loaded mission');            // Info
 ///   G20Log.w('RX', 'Connection unstable');            // Warning
 ///   G20Log.e('Inference', 'Model failed to load');    // Error
 ///   G20Log.perf('Waterfall', 'Frame: 7ms');           // Performance (disabled by default)
-/// 
+///
 /// Configuration:
 ///   G20Log.enablePerf = true;  // Enable perf logging
 ///   G20Log.minLevel = LogLevel.info;  // Hide debug messages
@@ -27,93 +27,93 @@ enum LogLevel {
 /// Centralized logging for G20 app
 class G20Log {
   G20Log._();  // Prevent instantiation
-  
+
   // ============================================
   // CONFIGURATION - Set these at app startup
   // ============================================
-  
+
   /// Minimum log level to display (messages below this are hidden)
   static LogLevel minLevel = kDebugMode ? LogLevel.debug : LogLevel.info;
-  
+
   /// Enable performance logging (very verbose, disabled by default)
   static bool enablePerf = false;
-  
+
   /// If non-empty, only show logs from these modules
   /// Empty set = show all modules
   static Set<String> enabledModules = {};
-  
+
   /// If true, include timestamps in log output
   static bool showTimestamps = false;
-  
+
   /// Performance log interval - only print every N calls
   /// Set to 1 for every call, 30 for ~once per second at 30fps
   static int perfLogInterval = 30;
-  
+
   // Track perf call counts per tag
   static final Map<String, int> _perfCounts = {};
-  
+
   // ============================================
   // LOGGING METHODS
   // ============================================
-  
+
   /// Debug level - verbose info for development
   static void d(String module, String message) {
     _log(LogLevel.debug, module, message);
   }
-  
+
   /// Info level - normal operation events
   static void i(String module, String message) {
     _log(LogLevel.info, module, message);
   }
-  
+
   /// Warning level - non-fatal issues
   static void w(String module, String message) {
     _log(LogLevel.warn, module, message);
   }
-  
+
   /// Error level - needs attention
   static void e(String module, String message) {
     _log(LogLevel.error, module, message);
   }
-  
+
   /// Performance logging - throttled by perfLogInterval
   /// Returns true if the log was actually printed (for conditional work)
   static bool perf(String module, String message) {
     if (!enablePerf) return false;
-    
+
     // Increment and check interval
     _perfCounts[module] = (_perfCounts[module] ?? 0) + 1;
     if (_perfCounts[module]! % perfLogInterval != 0) {
       return false;  // Skip this one
     }
-    
+
     _log(LogLevel.perf, module, message);
     return true;
   }
-  
+
   /// Reset perf counters (call on significant state changes)
   static void resetPerfCounters() {
     _perfCounts.clear();
   }
-  
+
   // ============================================
   // INTERNAL
   // ============================================
-  
+
   static void _log(LogLevel level, String module, String message) {
     // Check minimum level
     if (level.index < minLevel.index && level != LogLevel.perf) {
       return;
     }
-    
+
     // Check module filter
     if (enabledModules.isNotEmpty && !enabledModules.contains(module)) {
       return;
     }
-    
+
     // Build log string
     final buffer = StringBuffer();
-    
+
     // Timestamp (optional)
     if (showTimestamps) {
       final now = DateTime.now();
@@ -122,16 +122,16 @@ class G20Log {
           '${now.second.toString().padLeft(2, '0')}.'
           '${now.millisecond.toString().padLeft(3, '0')} ');
     }
-    
+
     // Level prefix
     buffer.write(_levelPrefix(level));
-    
+
     // Module and message
     buffer.write('[$module] $message');
-    
+
     debugPrint(buffer.toString());
   }
-  
+
   static String _levelPrefix(LogLevel level) {
     switch (level) {
       case LogLevel.debug:

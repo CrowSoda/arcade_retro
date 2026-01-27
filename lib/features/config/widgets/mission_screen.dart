@@ -19,7 +19,7 @@ class MissionScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(missionProvider);
     final activeMission = state.activeMission;
-    
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -55,13 +55,13 @@ class MissionScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              
+
               // Mission summary
               if (activeMission != null) ...[
                 _MissionSummaryCard(mission: activeMission),
                 const SizedBox(height: 16),
               ],
-              
+
               // Action buttons
               Wrap(
                 spacing: 8,
@@ -76,14 +76,14 @@ class MissionScreen extends ConsumerWidget {
                     ),
                   ),
                   ElevatedButton.icon(
-                    onPressed: activeMission != null 
+                    onPressed: activeMission != null
                         ? () => _showEditMissionDialog(context, ref, activeMission)
                         : null,
                     icon: const Icon(Icons.edit, size: 18),
                     label: const Text('Edit'),
                   ),
                   ElevatedButton.icon(
-                    onPressed: activeMission != null 
+                    onPressed: activeMission != null
                         ? () => _showDuplicateDialog(context, ref)
                         : null,
                     icon: const Icon(Icons.copy, size: 18),
@@ -105,7 +105,7 @@ class MissionScreen extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 24),
-          
+
           // Available Missions List
           _buildSection(
             title: 'Available Missions',
@@ -131,7 +131,7 @@ class MissionScreen extends ConsumerWidget {
                     final filePath = state.availableMissions[index];
                     final fileName = path.basename(filePath);
                     final isActive = activeMission?.filePath == filePath;
-                    
+
                     return ListTile(
                       leading: Icon(
                         isActive ? Icons.radio_button_checked : Icons.radio_button_unchecked,
@@ -144,7 +144,7 @@ class MissionScreen extends ConsumerWidget {
                           color: isActive ? G20Colors.primary : null,
                         ),
                       ),
-                      trailing: isActive 
+                      trailing: isActive
                           ? const Chip(
                               label: Text('ACTIVE', style: TextStyle(fontSize: 10)),
                               backgroundColor: G20Colors.primary,
@@ -159,7 +159,7 @@ class MissionScreen extends ConsumerWidget {
                 ),
             ],
           ),
-          
+
           // Error display
           if (state.error != null) ...[
             const SizedBox(height: 16),
@@ -219,7 +219,7 @@ class MissionScreen extends ConsumerWidget {
   void _showNewMissionDialog(BuildContext context, WidgetRef ref) {
     final nameController = TextEditingController();
     final descController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -275,7 +275,7 @@ class MissionScreen extends ConsumerWidget {
 
   void _showDuplicateDialog(BuildContext context, WidgetRef ref) {
     final nameController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -586,7 +586,7 @@ class _MissionEditDialogState extends ConsumerState<MissionEditDialog> {
 
   void _saveChanges() {
     final notifier = ref.read(missionProvider.notifier);
-    
+
     notifier.updateActiveMission((m) => m.copyWith(
       name: _nameController.text.trim(),
       description: _descController.text.trim(),
@@ -596,25 +596,25 @@ class _MissionEditDialogState extends ConsumerState<MissionEditDialog> {
       confidenceThreshold: _confidenceThreshold,
       autoRecordDetections: _autoRecord,
     ));
-    
+
     notifier.saveMission();
-    
+
     // Apply hot-reloadable settings to backend
     _applyMissionToBackend(ref, _confidenceThreshold);
-    
+
     Navigator.pop(context);
   }
-  
+
   /// Apply hot-reloadable mission settings to the backend via WebSocket
   void _applyMissionToBackend(WidgetRef ref, double confidenceThreshold) {
     final videoStream = ref.read(videoStreamProvider.notifier);
-    
+
     // Apply confidence threshold (hot-reloadable)
     videoStream.setScoreThreshold(confidenceThreshold);
-    
+
     // Also sync with settings providers
     ref.read(scoreThresholdProvider.notifier).state = confidenceThreshold;
-    
+
     debugPrint('[MissionEdit] Applied settings - confidence: ${(confidenceThreshold * 100).round()}%');
   }
 }

@@ -1,5 +1,5 @@
 /// Connection Indicator Widget - Backend connection status dot
-/// 
+///
 /// Shows green/yellow/red dot based on backend and stream connection state
 library;
 
@@ -18,16 +18,16 @@ class ConnectionIndicator extends ConsumerWidget {
     // Check both backend launcher and video stream connection
     final backendState = ref.watch(backendLauncherProvider);
     final videoState = ref.watch(videoStreamProvider);
-    
+
     // Connected if backend is running (has wsPort) AND video stream is connected
     final isConnected = backendState.wsPort != null && videoState.isConnected;
     final isPartial = backendState.wsPort != null && !videoState.isConnected;
 
-    final color = isConnected ? G20Colors.success 
-        : isPartial ? G20Colors.warning 
+    final color = isConnected ? G20Colors.success
+        : isPartial ? G20Colors.warning
         : G20Colors.error;
-    
-    final message = isConnected ? 'Connected to backend' 
+
+    final message = isConnected ? 'Connected to backend'
         : isPartial ? 'Backend running, stream disconnected'
         : 'Disconnected';
 

@@ -25,17 +25,17 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   RfcapHeader? _loadedHeader;
   // _isTraining is now derived from the provider state (persists across navigation)
   bool _isLoadingFiles = true;
-  
+
   // Training preset (research-based)
   tp.TrainingPreset _selectedPreset = tp.TrainingPreset.balanced;
-  
+
   final _classNameController = TextEditingController();
   List<String> _availableFiles = [];
-  
+
   // Persistent label boxes PER FILE - keyed by filepath
   final Map<String, List<LabelBox>> _boxesByFile = {};
   int? _selectedBoxId;
-  
+
   // Auto-refresh timer
   Timer? _refreshTimer;
 
@@ -53,22 +53,22 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     _classNameController.dispose();
     super.dispose();
   }
-  
+
   /// Get current boxes for the selected file
   List<LabelBox> get _labelBoxes {
     if (_selectedFile == null) return [];
     return _boxesByFile[_selectedFile!] ??= [];
   }
-  
+
   /// Get the .labels.json sidecar path for an rfcap file
   String _getLabelsPath(String rfcapPath) {
     return rfcapPath.replaceAll('.rfcap', '.labels.json');
   }
-  
+
   /// Save labels to sidecar JSON file
   Future<void> _saveLabels() async {
     if (_selectedFile == null || _labelBoxes.isEmpty) return;
-    
+
     final labelsPath = _getLabelsPath(_selectedFile!);
     final labelData = {
       'version': 1,
@@ -88,7 +88,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         'time_end_sec': box.timeEndSec,
       }).toList(),
     };
-    
+
     try {
       final file = File(labelsPath);
       await file.writeAsString(const JsonEncoder.withIndent('  ').convert(labelData));
@@ -97,24 +97,24 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       debugPrint('Error saving labels: $e');
     }
   }
-  
+
   /// Load labels from sidecar JSON file
   Future<void> _loadLabels(String rfcapPath) async {
     final labelsPath = _getLabelsPath(rfcapPath);
     final file = File(labelsPath);
-    
+
     if (!await file.exists()) {
       debugPrint('No labels file found for ${path.basename(rfcapPath)}');
       return;
     }
-    
+
     try {
       final jsonStr = await file.readAsString();
       final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-      
+
       final boxes = <LabelBox>[];
       final boxList = data['boxes'] as List<dynamic>? ?? [];
-      
+
       for (final boxData in boxList) {
         boxes.add(LabelBox(
           id: boxData['id'] ?? DateTime.now().millisecondsSinceEpoch,
@@ -129,7 +129,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
           timeEndSec: boxData['time_end_sec']?.toDouble(),
         ));
       }
-      
+
       setState(() {
         _boxesByFile[rfcapPath] = boxes;
         // Also restore class name if present
@@ -138,7 +138,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
           _classNameController.text = savedClassName;
         }
       });
-      
+
       debugPrint('📂 Loaded ${boxes.length} labels from ${path.basename(labelsPath)}');
     } catch (e) {
       debugPrint('Error loading labels: $e');
@@ -147,10 +147,10 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 
   Future<void> _loadAvailableFiles() async {
     setState(() => _isLoadingFiles = true);
-    
+
     final currentDir = Directory.current.path;
     final capturesDir = Directory('$currentDir/data/captures');
-    
+
     if (!await capturesDir.exists()) {
       final altDir = Directory('$currentDir/g20_demo/data/captures');
       if (await altDir.exists()) {
@@ -160,7 +160,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     } else {
       await _loadFilesFromDir(capturesDir);
     }
-    
+
     setState(() => _isLoadingFiles = false);
   }
 
@@ -176,18 +176,24 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         }
       }
     }
-    
-    // Sort by most recent (modification time)
-    files.sort((a, b) {
+
+    // Sort by most recent (modification time) - fetch times async first
+    final fileTimes = <String, DateTime>{};
+    for (final file in files) {
       try {
-        final aTime = File(a).statSync().modified;
-        final bTime = File(b).statSync().modified;
-        return bTime.compareTo(aTime);  // Most recent first
+        final stat = await File(file).stat();
+        fileTimes[file] = stat.modified;
       } catch (_) {
-        return 0;
+        fileTimes[file] = DateTime.fromMillisecondsSinceEpoch(0);
       }
+    }
+
+    files.sort((a, b) {
+      final aTime = fileTimes[a] ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = fileTimes[b] ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);  // Most recent first
     });
-    
+
     setState(() {
       _availableFiles = files;
       _isLoadingFiles = false;
@@ -212,7 +218,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         _classNameController.text = header.signalName;
       });
       print('Loaded RFCAP: $header');
-      
+
       // Load any saved labels for this file
       await _loadLabels(filepath);
     }
@@ -225,7 +231,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: G20Colors.surfaceDark,
         title: const Text('Delete File?', style: TextStyle(color: G20Colors.textPrimaryDark)),
-        content: Text('Delete ${path.basename(filepath)}?', 
+        content: Text('Delete ${path.basename(filepath)}?',
           style: const TextStyle(color: G20Colors.textSecondaryDark)),
         actions: [
           TextButton(
@@ -240,7 +246,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         ],
       ),
     );
-    
+
     if (confirm == true) {
       try {
         await File(filepath).delete();
@@ -268,15 +274,15 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 
   void _onBoxCreated(LabelBox box) {
     // Use class name from text field
-    box.className = _classNameController.text.trim().isEmpty 
-        ? 'unknown' 
+    box.className = _classNameController.text.trim().isEmpty
+        ? 'unknown'
         : _classNameController.text.trim();
-    
+
     setState(() {
       _labelBoxes.add(box);
       _selectedBoxId = box.id;
     });
-    
+
     // Auto-save labels to file
     _saveLabels();
   }
@@ -295,7 +301,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _labelBoxes.removeWhere((b) => b.id == id);
       if (_selectedBoxId == id) _selectedBoxId = null;
     });
-    
+
     // Auto-save labels to file (even if now empty - removes the file content)
     _saveLabels();
   }
@@ -320,7 +326,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       );
       return;
     }
-    
+
     final className = _classNameController.text.trim();
     if (className.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -331,25 +337,25 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       );
       return;
     }
-    
+
     _doRealTraining();
   }
 
   void _doRealTraining() async {
     if (_selectedFile == null || _loadedHeader == null) return;
-    
+
     final className = _classNameController.text.trim();
     final notifier = ref.read(tp.trainingProvider.notifier);
     final header = _loadedHeader!;
-    
+
     // Convert LabelBox to the format expected by training provider
     // CRITICAL: Python's sample_manager uses a FIXED 0.1s window centered on the box.
     // We just need to send the correct center time - Python handles the windowing.
-    // 
+    //
     // For OLD boxes with null timeStartSec: we can't recover the original time,
     // so log a warning and skip them (user needs to redraw).
     final validBoxes = <Map<String, dynamic>>[];
-    
+
     for (final box in _labelBoxes) {
       // Check if this box has valid time coordinates
       if (box.timeStartSec == null || box.timeEndSec == null) {
@@ -357,11 +363,11 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         debugPrint('           Box normalized coords: x1=${box.x1}, x2=${box.x2}');
         continue;  // Skip this box - can't recover time without knowing original window
       }
-      
+
       // Time coordinates are already absolute - use them directly
       final timeStart = box.timeStartSec!;
       final timeEnd = box.timeEndSec!;
-      
+
       // Python reads a SMALL window (0.1s) centered on the box center, regardless of box size.
       // So even if the user drew a large box, we only need to send the center time.
       // Let's clamp to reasonable values.
@@ -369,17 +375,17 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       if (boxDuration > 1.0) {
         debugPrint('[Training] ⚠️ Box duration ${boxDuration.toStringAsFixed(2)}s is very large - Python will only use 0.1s window');
       }
-      
+
       // Frequency: use box values or calculate from normalized coords
       final bandwidth = header.sampleRate;  // FFT Nyquist = sample_rate
-      final freqStart = box.freqStartMHz ?? 
+      final freqStart = box.freqStartMHz ??
           (header.centerFreqHz - bandwidth/2 + (1 - box.y2.clamp(0, 1)) * bandwidth) / 1e6;
-      final freqEnd = box.freqEndMHz ?? 
+      final freqEnd = box.freqEndMHz ??
           (header.centerFreqHz - bandwidth/2 + (1 - box.y1.clamp(0, 1)) * bandwidth) / 1e6;
-      
+
       debugPrint('[Training] Box: time=${timeStart.toStringAsFixed(3)}s-${timeEnd.toStringAsFixed(3)}s, '
           'freq=${freqStart.toStringAsFixed(2)}-${freqEnd.toStringAsFixed(2)}MHz');
-      
+
       validBoxes.add({
         'x1': box.x1,
         'y1': box.y1,
@@ -391,9 +397,9 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         'freq_end_mhz': freqEnd,
       });
     }
-    
+
     final boxes = validBoxes;
-    
+
     if (boxes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -403,7 +409,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       );
       return;
     }
-    
+
     try {
       final result = await notifier.trainFromFile(
         rfcapPath: _selectedFile!,
@@ -412,11 +418,11 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         preset: _selectedPreset,  // Use selected preset
         header: _loadedHeader,
       );
-      
+
       if (mounted && result != null) {
         // Save to local database too
         _saveTrainingResultsFromBackend(result);
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Training complete! F1: ${result.f1Score.toStringAsFixed(3)}'),
@@ -450,7 +456,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   void _stopTraining() {
     ref.read(tp.trainingProvider.notifier).cancelTraining();
   }
-  
+
   /// Save training results from backend to local signal database
   void _saveTrainingResultsFromBackend(tp.TrainingResult result) {
     final dbResult = TrainingResult(
@@ -463,7 +469,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       loss: 0.0, // Backend doesn't return final loss
       modelPath: 'models/heads/${result.signalName}/active.pth',
     );
-    
+
     ref.read(signalDatabaseProvider.notifier).addTrainingResult(result.signalName, dbResult);
     debugPrint('[Training] Saved backend result to DB: ${result.signalName}');
   }
@@ -472,7 +478,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   String _extractSignalName(String filename) {
     // Remove .rfcap extension
     var name = filename.replaceAll('.rfcap', '');
-    
+
     // Split by underscore and take all parts except the last one (which is the timestamp)
     final parts = name.split('_');
     if (parts.length >= 2) {
@@ -481,7 +487,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       parts.removeLast();
       name = parts.join('_');
     }
-    
+
     return name.toLowerCase();
   }
 
@@ -516,7 +522,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            
+
             // RIGHT: Controls sidebar
             SizedBox(
               width: 280,
@@ -533,7 +539,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                     child: _buildFileSelector(),
                   ),
                   const SizedBox(height: 8),
-                  
+
                   // SOI info
                   if (_loadedHeader != null)
                     Container(
@@ -546,7 +552,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                       child: _buildSoiInfoVertical(),
                     ),
                   if (_loadedHeader != null) const SizedBox(height: 8),
-                  
+
                   // Class name + Train button
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -558,7 +564,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                     child: _buildControlsVertical(),
                   ),
                   const SizedBox(height: 8),
-                  
+
                   // Labels table
                   Expanded(
                     child: Container(
@@ -634,7 +640,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                               final soiColor = getSOIColor(signalName);
                               return Align(
                                 alignment: Alignment.centerLeft,
-                                child: Text(name, 
+                                child: Text(name,
                                   style: TextStyle(color: soiColor, fontSize: 12, fontWeight: FontWeight.w500),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -645,7 +651,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                               final signalName = _extractSignalName(name);
                               final soiColor = getSOIColor(signalName);
                               return DropdownMenuItem(
-                                value: f, 
+                                value: f,
                                 child: Row(
                                   children: [
                                     Container(
@@ -654,7 +660,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                                       decoration: BoxDecoration(color: soiColor, shape: BoxShape.circle),
                                     ),
                                     Expanded(
-                                      child: Text(name, 
+                                      child: Text(name,
                                         style: TextStyle(color: soiColor, fontSize: 12, fontWeight: FontWeight.w500),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -688,14 +694,14 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 
   Widget _buildSoiInfoVertical() {
     if (_loadedHeader == null) return const SizedBox();
-    
+
     // Format sample rate nicely
     final srMHz = _loadedHeader!.sampleRate / 1e6;
     final srStr = srMHz >= 1 ? '${srMHz.toStringAsFixed(1)} Msps' : '${(_loadedHeader!.sampleRate / 1e3).toStringAsFixed(0)} ksps';
-    
+
     // Get SOI color for the signal
     final soiColor = getSOIColor(_loadedHeader!.signalName);
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -745,7 +751,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     // Watch training state from provider (persists across navigation)
     final trainingState = ref.watch(tp.trainingProvider);
     final isTraining = trainingState.isTraining || trainingState.isSavingSamples;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -765,7 +771,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
           onChanged: _updateAllBoxClasses,
         ),
         const SizedBox(height: 8),
-        
+
         // Training preset selector
         const Text('Preset', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11)),
         const SizedBox(height: 4),
@@ -825,12 +831,12 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${(progress * 100).toInt()}%', 
+                      Text('${(progress * 100).toInt()}%',
                         style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11)),
                       ElevatedButton(
                         onPressed: _stopTraining,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: G20Colors.error, 
+                          backgroundColor: G20Colors.error,
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         ),
                         child: const Text('Stop', style: TextStyle(fontSize: 12)),
@@ -847,7 +853,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
             icon: const Icon(Icons.rocket_launch, size: 18),
             label: const Text('Train Model', style: TextStyle(fontSize: 13)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: G20Colors.success, 
+              backgroundColor: G20Colors.success,
               padding: const EdgeInsets.symmetric(vertical: 12),
             ),
           ),
@@ -868,7 +874,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         ),
       );
     }
-    
+
     return ListView.builder(
       padding: const EdgeInsets.all(4),
       itemCount: _labelBoxes.length,
@@ -891,7 +897,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('#${index + 1} ${box.className}', 
+                    Text('#${index + 1} ${box.className}',
                       style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 12, fontWeight: FontWeight.w500)),
                     GestureDetector(
                       onTap: () => _onBoxDeleted(box.id),
@@ -921,7 +927,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         ),
       );
     }
-    
+
     return ListView.builder(
       padding: const EdgeInsets.all(4),
       itemCount: _labelBoxes.length,

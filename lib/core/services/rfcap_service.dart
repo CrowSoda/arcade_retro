@@ -3,9 +3,9 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 /// G20 RFCAP File Format Header
-/// 
+///
 /// Total: 512 bytes (fixed)
-/// 
+///
 /// | Offset | Size | Type     | Field              |
 /// |--------|------|----------|--------------------|
 /// | 0      | 4    | char[4]  | Magic ("G20\0")    |
@@ -19,7 +19,7 @@ import 'dart:typed_data';
 /// | 80     | 8    | float64  | Latitude           |
 /// | 88     | 8    | float64  | Longitude          |
 /// | 96     | 416  | reserved | (zeros)            |
-/// 
+///
 /// After header: complex64 IQ data (float32 I, float32 Q pairs)
 
 const int rfcapHeaderSize = 512;
@@ -212,7 +212,7 @@ class RfcapService {
 
   /// Read IQ samples from RFCAP file
   /// Returns Float32List of interleaved I,Q,I,Q... samples
-  /// 
+  ///
   /// NOTE: This validates actual file size vs header claims to prevent crashes.
   /// The returned data may be shorter than requested if file is truncated.
   static Future<Float32List?> readIqData(String filepath, {int? offsetSamples, int? numSamples}) async {
@@ -221,17 +221,17 @@ class RfcapService {
       if (header == null) return null;
 
       final file = File(filepath);
-      
+
       // Get actual file size to validate against header claims
       final actualFileSize = await file.length();
       final actualDataBytes = actualFileSize - rfcapHeaderSize;
       final actualSamplesInFile = actualDataBytes ~/ 8;  // 8 bytes per complex sample
-      
+
       // Warn if header claims more data than exists
       if (header.numSamples > actualSamplesInFile) {
         print('WARNING: RFCAP header claims ${header.numSamples} samples, but file only contains $actualSamplesInFile');
       }
-      
+
       final raf = await file.open(mode: FileMode.read);
 
       // Calculate offset with bounds checking
@@ -241,7 +241,7 @@ class RfcapService {
         await raf.close();
         return Float32List(0);
       }
-      
+
       // Seek to data start
       final dataStart = rfcapHeaderSize + offset * 8;
       await raf.setPosition(dataStart);
@@ -250,13 +250,13 @@ class RfcapService {
       final requestedSamples = numSamples ?? header.numSamples;
       final availableSamples = actualSamplesInFile - offset;
       final samplesToRead = requestedSamples < availableSamples ? requestedSamples : availableSamples;
-      
+
       if (samplesToRead <= 0) {
         print('ERROR: No samples available to read');
         await raf.close();
         return Float32List(0);
       }
-      
+
       final bytesToRead = samplesToRead * 8;
       final bytes = await raf.read(bytesToRead);
       await raf.close();
@@ -277,12 +277,12 @@ class RfcapService {
       if (header == null) return null;
 
       final file = File(filepath);
-      
+
       // Get actual file size to validate
       final actualFileSize = await file.length();
       final actualDataBytes = actualFileSize - rfcapHeaderSize;
       final actualSamplesInFile = actualDataBytes ~/ 8;
-      
+
       final raf = await file.open(mode: FileMode.read);
 
       // Calculate offset with bounds checking
@@ -291,7 +291,7 @@ class RfcapService {
         await raf.close();
         return Uint8List(0);
       }
-      
+
       // Seek to data start
       final dataStart = rfcapHeaderSize + offset * 8;
       await raf.setPosition(dataStart);
@@ -300,12 +300,12 @@ class RfcapService {
       final requestedSamples = numSamples ?? header.numSamples;
       final availableSamples = actualSamplesInFile - offset;
       final samplesToRead = requestedSamples < availableSamples ? requestedSamples : availableSamples;
-      
+
       if (samplesToRead <= 0) {
         await raf.close();
         return Uint8List(0);
       }
-      
+
       final bytesToRead = samplesToRead * 8;
       final bytes = await raf.read(bytesToRead);
       await raf.close();
@@ -327,11 +327,11 @@ class RfcapService {
   }
 
   /// Generate mock IQ data with simulated signal
-  /// 
+  ///
   /// Creates realistic-looking IQ data with:
   /// - Background noise
   /// - A signal burst in the specified frequency/time range
-  /// 
+  ///
   /// [durationSec] - How many seconds of data
   /// [sampleRate] - Sample rate in Hz
   /// [signalFreqOffset] - Frequency offset from center in Hz (0 = center)
@@ -345,39 +345,39 @@ class RfcapService {
   }) {
     final rng = math.Random();
     final numSamples = (durationSec * sampleRate).toInt();
-    
+
     // Create Float32 buffer for I/Q pairs
     final floatData = Float32List(numSamples * 2);
-    
+
     // Signal parameters
     final signalPower = math.pow(10, snrDb / 20);  // Linear amplitude
     final noiseLevel = 0.1;  // Baseline noise
-    
+
     // Simulate signal with some modulation
     final signalFreqRad = 2 * math.pi * signalFreqOffset / sampleRate;
-    
+
     for (int i = 0; i < numSamples; i++) {
       // Noise (complex Gaussian)
       final noiseI = (rng.nextDouble() - 0.5) * 2 * noiseLevel;
       final noiseQ = (rng.nextDouble() - 0.5) * 2 * noiseLevel;
-      
+
       // Simulated signal - carrier with some random modulation
       final t = i / sampleRate;
       final phase = signalFreqRad * i;
-      
+
       // Add some bursty behavior (signal fades in/out)
       final burst = (math.sin(2 * math.pi * t * 0.5) + 1) / 2;  // Slow fade
       final mod = 0.5 + 0.5 * math.sin(2 * math.pi * t * 1000);  // AM modulation
-      
+
       final sigAmp = signalPower * burst * mod * noiseLevel;
       final sigI = sigAmp * math.cos(phase);
       final sigQ = sigAmp * math.sin(phase);
-      
+
       // Combine
       floatData[i * 2] = (noiseI + sigI).toDouble();
       floatData[i * 2 + 1] = (noiseQ + sigQ).toDouble();
     }
-    
+
     // Convert to bytes
     return floatData.buffer.asUint8List();
   }
@@ -400,14 +400,14 @@ class RfcapService {
   /// Example: MAN_26012026_043243_825MHz.rfcap
   static String generateFilename(String signalName, [DateTime? time, double? freqMHz]) {
     final dtg = generateDTG(time);
-    
+
     // Format frequency - round to nearest integer for clean filenames
     final freqStr = freqMHz != null ? '${freqMHz.round()}MHz' : '';
-    
+
     // Use MAN_ prefix for manual captures, otherwise use signal name
     if (signalName.toUpperCase() == 'MAN' || signalName.toUpperCase().startsWith('MAN_')) {
       // Manual capture: MAN_ddmmyyyy_hhmmss_FREQMHz.rfcap
-      return freqStr.isNotEmpty 
+      return freqStr.isNotEmpty
           ? 'MAN_${dtg}_$freqStr.rfcap'
           : 'MAN_$dtg.rfcap';
     } else {

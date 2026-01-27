@@ -1,13 +1,15 @@
 // lib/core/services/backend_launcher.dart
 /// Auto-launch and manage the Python backend server on app startup.
-/// 
+///
 /// SHUTDOWN HANDLING:
 /// - Uses PID file tracking to detect/kill stale processes on startup
 /// - Implements graceful shutdown with timeout fallback to force kill
 /// - On Windows uses taskkill /F /T to kill process tree (including FFmpeg)
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import '../grpc/connection_manager.dart';
@@ -41,7 +43,7 @@ class BackendLauncherState {
   });
 
   bool get isRunning => state == BackendState.running;
-  
+
   // Legacy getter for backward compatibility
   int get port => grpcPort;
 
@@ -72,7 +74,6 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
   final Ref _ref;
   Process? _process;
-  StreamSubscription? _stdoutSub;
   StreamSubscription? _stderrSub;
   bool _disposed = false;
 
@@ -101,6 +102,53 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
   /// Path to the PID file (used to track backend process for cleanup)
   String get _pidFilePath => p.join(_backendPath, '.backend.pid');
+
+  /// Path to runtime/server.json (written by Python backend when ready)
+  String get _serverInfoPath {
+    // runtime/ is at project root level (parent of backend/)
+    return p.join(p.dirname(_backendPath), 'runtime', 'server.json');
+  }
+
+  /// Read server info from runtime/server.json
+  /// Returns null if file doesn't exist or is invalid
+  Future<Map<String, dynamic>?> _readServerInfo() async {
+    try {
+      final file = File(_serverInfoPath);
+      if (!await file.exists()) return null;
+      final content = await file.readAsString();
+      return jsonDecode(content) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Poll for server.json until it appears or timeout
+  Future<Map<String, dynamic>?> _waitForServerInfo({
+    Duration timeout = const Duration(seconds: 30),
+    Duration pollInterval = const Duration(milliseconds: 200),
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    while (stopwatch.elapsed < timeout) {
+      final info = await _readServerInfo();
+      if (info != null && info['ready'] == true) {
+        return info;
+      }
+      await Future.delayed(pollInterval);
+    }
+    return null;
+  }
+
+  /// Delete server.json on startup (clean slate)
+  Future<void> _deleteServerInfo() async {
+    try {
+      final file = File(_serverInfoPath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // Ignore errors
+    }
+  }
 
   /// Write the PID to a file for tracking
   Future<void> _writePidFile(int pid) async {
@@ -132,12 +180,12 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
       final content = await pidFile.readAsString();
       final oldPid = int.tryParse(content.trim());
-      
+
       if (oldPid == null) {
         await pidFile.delete();
         return;
       }
-      
+
       // Check if process is still running and kill it
       if (Platform.isWindows) {
         // On Windows, use taskkill to kill the process tree
@@ -155,7 +203,7 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
       // Delete the stale PID file
       await pidFile.delete();
-      
+
       // Wait a moment for ports to be released
       await Future.delayed(const Duration(milliseconds: 500));
     } catch (_) {
@@ -176,9 +224,10 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
     );
 
     try {
-      // Clean up any stale processes from previous runs first
+      // Clean up any stale processes and server.json from previous runs
       await _cleanupStalePids();
-      
+      await _deleteServerInfo();
+
       // Find Python executable
       final pythonExe = await _findPython();
       if (pythonExe == null) {
@@ -186,7 +235,7 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       }
 
       // Build command - run server.py with both gRPC and WebSocket
-      // Use --ws-port 0 for auto-discovery (OS picks free port, server prints it)
+      // Use --ws-port 0 for auto-discovery (OS picks free port, writes to server.json)
       final serverScript = p.join(_backendPath, 'server.py');
       final args = [serverScript, '--port', port.toString(), '--ws-port', '0'];
 
@@ -198,34 +247,11 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
       );
 
       final pid = _process!.pid;
-      
+
       // Write PID file for tracking (used to cleanup stale processes on restart)
       await _writePidFile(pid);
 
-      // Capture stdout - PRINT TO CONSOLE for debugging
-      _stdoutSub = _process!.stdout
-          .transform(const SystemEncoding().decoder)
-          .listen((data) {
-        print('[Python] $data');  // PRINT SO WE CAN SEE IT
-        _addLog('[OUT] $data');
-        
-        // Parse WS_PORT from server stdout (KISS auto-discovery)
-        final wsPortMatch = RegExp(r'WS_PORT:(\d+)').firstMatch(data);
-        if (wsPortMatch != null) {
-          final discoveredPort = int.parse(wsPortMatch.group(1)!);
-          state = state.copyWith(wsPort: discoveredPort);
-        }
-        
-        // Detect when server is ready (WebSocket or gRPC)
-        if (data.contains('WebSocket server READY') || 
-            data.contains('gRPC server started') || 
-            data.contains('Serving on')) {
-          state = state.copyWith(state: BackendState.running);
-          _connectToBackend(port);
-        }
-      });
-
-      // Capture stderr - PRINT TO CONSOLE for debugging
+      // Capture stderr - PRINT TO CONSOLE for debugging (only errors/warnings)
       _stderrSub = _process!.stderr
           .transform(const SystemEncoding().decoder)
           .listen((data) {
@@ -246,14 +272,30 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
       state = state.copyWith(pid: pid);
 
-      // Wait a bit for server to start
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // If still starting, assume running
-      if (state.state == BackendState.starting) {
-        state = state.copyWith(state: BackendState.running);
-        _connectToBackend(port);
+      // Wait for server.json to appear (replaces stdout parsing)
+      // Server writes this file when WebSocket server is ready
+      debugPrint('[Flutter] Waiting for server.json...');
+      final serverInfo = await _waitForServerInfo(
+        timeout: const Duration(seconds: 30),
+      );
+
+      if (serverInfo == null) {
+        throw Exception('Backend failed to start (server.json not created within 30s)');
       }
+
+      // Read ports from server.json
+      final wsPort = serverInfo['ws_port'] as int?;
+      final grpcPortFromFile = serverInfo['grpc_port'] as int? ?? port;
+
+      debugPrint('[Flutter] Server ready: WS=$wsPort, gRPC=$grpcPortFromFile');
+
+      state = state.copyWith(
+        state: BackendState.running,
+        wsPort: wsPort,
+        grpcPort: grpcPortFromFile,
+      );
+
+      _connectToBackend(grpcPortFromFile);
 
       return true;
     } catch (e) {
@@ -267,12 +309,11 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
 
   /// Stop the backend server
   Future<void> stopBackend() async {
-    _stdoutSub?.cancel();
     _stderrSub?.cancel();
 
     if (_process != null) {
       final pid = _process!.pid;
-      
+
       if (Platform.isWindows) {
         // Use taskkill /F /T to kill entire process tree (includes FFmpeg subprocesses)
         await Process.run('taskkill', ['/F', '/T', '/PID', pid.toString()]);
@@ -284,7 +325,7 @@ class BackendLauncherNotifier extends StateNotifier<BackendLauncherState> {
           _process!.kill(ProcessSignal.sigkill);
         }
       }
-      
+
       _process = null;
     }
 

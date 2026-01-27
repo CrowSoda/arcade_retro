@@ -1,5 +1,5 @@
 /// Recording Indicator Widget - Animated recording status for nav rail
-/// 
+///
 /// Shows pulsing recording indicator with progress, queue badge, and cancel on tap
 library;
 
@@ -45,7 +45,7 @@ class _RecordingIndicatorState extends ConsumerState<RecordingIndicator>
   @override
   Widget build(BuildContext context) {
     final captureState = ref.watch(manualCaptureProvider);
-    
+
     // Only show when actively capturing
     if (captureState.phase != CapturePhase.capturing) {
       return const SizedBox.shrink();

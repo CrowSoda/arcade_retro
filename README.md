@@ -8,7 +8,7 @@ Real-time RF signal detection and visualization using GPU-accelerated spectrogra
 # 1. Install Flutter dependencies
 flutter pub get
 
-# 2. Install Python backend dependencies  
+# 2. Install Python backend dependencies
 cd backend && pip install -r requirements.txt
 
 # 3. Generate gRPC stubs
@@ -182,7 +182,7 @@ Current capture simulation reads from file and writes to disk in chunks. Product
 1. **DMA Ring Buffer Consumer** - Replace file source with FPGA/SDR DMA ring buffer
    - Sidekiq NV100 streams IQ data via PCIe DMA to a ring buffer
    - Consumer thread should read from ring buffer, not file
-   
+
 2. **Zero-Copy if Possible** - Use `mmap` or direct buffer access to avoid copying
    - Current: `read() → Uint8List → writeFrom()`
    - Goal: DMA buffer → disk with minimal CPU involvement

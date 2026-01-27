@@ -1,5 +1,5 @@
 /// RX Status Card Widget - Displays SDR channel status
-/// 
+///
 /// Shows frequency, bandwidth, mode, and connection status for each RX channel
 library;
 
@@ -17,7 +17,7 @@ class RxStatusDisplay extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final rxState = ref.watch(multiRxProvider);
     final connectedChannels = rxState.connectedChannels;
-    
+
     if (connectedChannels.isEmpty) {
       return const RxStatusCard(
         rxNumber: 0,

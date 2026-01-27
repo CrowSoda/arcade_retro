@@ -63,20 +63,20 @@ class _PsdChartState extends ConsumerState<PsdChart>
     final detections = ref.watch(detectionProvider);
 
     return LayoutBuilder(
-      builder: (context, constraints) {        
+      builder: (context, constraints) {
         _chartHeight = constraints.maxHeight.toInt().clamp(50, 300);
-        
+
         // Build image from video stream PSD data
-        _buildImageAsync(videoState);      
+        _buildImageAsync(videoState);
 
         const leftMargin = 35.0;
         const rightMargin = 8.0;
         const topMargin = 4.0;
         const bottomMargin = 18.0;
 
-        final plotRect = Rect.fromLTRB(        
+        final plotRect = Rect.fromLTRB(
           leftMargin, topMargin,
-          constraints.maxWidth - rightMargin,  
+          constraints.maxWidth - rightMargin,
           constraints.maxHeight - bottomMargin,
         );
 
@@ -88,38 +88,38 @@ class _PsdChartState extends ConsumerState<PsdChart>
           child: Stack(
             children: [
               Container(color: G20Colors.surfaceDark),
-              if (_displayImage != null)       
+              if (_displayImage != null)
                 Positioned(
                   left: plotRect.left,
                   top: plotRect.top,
-                  width: plotRect.width,       
-                  height: plotRect.height,     
+                  width: plotRect.width,
+                  height: plotRect.height,
                   child: RawImage(
-                    image: _displayImage,      
+                    image: _displayImage,
                     fit: BoxFit.fill,
                     filterQuality: FilterQuality.low,
                   ),
                 ),
-              // Detection frequency overlays  
+              // Detection frequency overlays
               Positioned(
                 left: plotRect.left,
                 top: plotRect.top,
                 width: plotRect.width,
-                height: plotRect.height,       
-                child: _DetectionOverlays(     
-                  detections: detections,      
+                height: plotRect.height,
+                child: _DetectionOverlays(
+                  detections: detections,
                   centerFreqMHz: centerFreqMHz,
                   bandwidthMHz: bandwidthMHz,
-                  plotWidth: plotRect.width,   
-                  plotHeight: plotRect.height, 
+                  plotWidth: plotRect.width,
+                  plotHeight: plotRect.height,
                 ),
               ),
               Positioned(
-                left: 0, top: topMargin, width: leftMargin - 2, height: plotRect.height,      
+                left: 0, top: topMargin, width: leftMargin - 2, height: plotRect.height,
                 child: const _YAxisLabels(),
               ),
               Positioned(
-                left: leftMargin, right: rightMargin, bottom: 0, height: bottomMargin,        
+                left: leftMargin, right: rightMargin, bottom: 0, height: bottomMargin,
                 child: const _XAxisLabels(centerFreqMHz: centerFreqMHz, bandwidthMHz: bandwidthMHz),
               ),
             ],
@@ -131,7 +131,7 @@ class _PsdChartState extends ConsumerState<PsdChart>
 
   Future<void> _buildImageAsync(VideoStreamState state) async {
     if (_computing) return;
-    
+
     final psdData = state.psd;
     if (psdData == null || psdData.isEmpty) return;
 
@@ -186,11 +186,11 @@ class _PsdParams {
 }
 
 /// Runs in isolate - generate pixel buffer for PSD with green gradient
-Uint8List _generatePsdPixels(_PsdParams p) {   
+Uint8List _generatePsdPixels(_PsdParams p) {
   final pixels = Uint8List(p.width * p.height * 4);
 
   // Background color
-  const bgR = 0x12, bgG = 0x17, bgB = 0x1C;    
+  const bgR = 0x12, bgG = 0x17, bgB = 0x1C;
 
   // Fill with background
   for (int i = 0; i < p.width * p.height; i++) {
@@ -201,7 +201,7 @@ Uint8List _generatePsdPixels(_PsdParams p) {
     pixels[idx + 3] = 255;
   }
 
-  if (p.psdData.isEmpty) return pixels;        
+  if (p.psdData.isEmpty) return pixels;
 
   // Smooth the PSD: decimate bins to width and apply smoothing
   final smoothedPsd = List<double>.filled(p.width, 0);
@@ -214,7 +214,7 @@ Uint8List _generatePsdPixels(_PsdParams p) {
     // Average the bins for this pixel
     double sum = 0;
     int count = 0;
-    for (int b = startBin; b < endBin; b++) {  
+    for (int b = startBin; b < endBin; b++) {
       final v = p.psdData[b];
       if (v.isFinite) {
         sum += v;
@@ -243,27 +243,27 @@ Uint8List _generatePsdPixels(_PsdParams p) {
   final sorted = List<double>.from(smoothed2)..sort();
   double noiseFloor = -60.0;
   if (sorted.isNotEmpty) {
-    noiseFloor = sorted[sorted.length ~/ 2];   
+    noiseFloor = sorted[sorted.length ~/ 2];
   }
 
   final minPower = noiseFloor - 7;
   final maxPower = noiseFloor + 45;
   final dbRange = maxPower - minPower;
 
-  // Draw each column with green gradient fill 
+  // Draw each column with green gradient fill
   for (int x = 0; x < p.width; x++) {
     final value = smoothed2[x];
     final normalized = ((value - minPower) / dbRange).clamp(0.0, 1.0);
-    final peakY = ((1.0 - normalized) * (p.height - 1)).round().clamp(0, p.height - 1);       
+    final peakY = ((1.0 - normalized) * (p.height - 1)).round().clamp(0, p.height - 1);
 
     // Fill from peak to bottom with green gradient
-    for (int y = peakY; y < p.height; y++) {   
-      final idx = (y * p.width + x) * 4;       
+    for (int y = peakY; y < p.height; y++) {
+      final idx = (y * p.width + x) * 4;
 
       final fillNorm = 1.0 - ((y - peakY) / (p.height - peakY)).clamp(0.0, 1.0);
       final colorNorm = (fillNorm * normalized).clamp(0.0, 1.0);
       final colorIdx = (colorNorm * 255).round().clamp(0, 255);
-      final rgb = viridisLut[colorIdx];        
+      final rgb = viridisLut[colorIdx];
 
       const alpha = 0.7;
       pixels[idx] = (rgb[0] * alpha + bgR * (1 - alpha)).round();
@@ -273,10 +273,10 @@ Uint8List _generatePsdPixels(_PsdParams p) {
     }
 
     // Bright peak line
-    if (peakY >= 0 && peakY < p.height) {      
+    if (peakY >= 0 && peakY < p.height) {
       final colorIdx = (normalized * 255).round().clamp(0, 255);
-      final rgb = viridisLut[colorIdx];        
-      final idx = (peakY * p.width + x) * 4;   
+      final rgb = viridisLut[colorIdx];
+      final idx = (peakY * p.width + x) * 4;
       pixels[idx] = rgb[0];
       pixels[idx + 1] = rgb[1];
       pixels[idx + 2] = rgb[2];
@@ -287,7 +287,7 @@ Uint8List _generatePsdPixels(_PsdParams p) {
   return pixels;
 }
 
-class _YAxisLabels extends StatelessWidget {   
+class _YAxisLabels extends StatelessWidget {
   const _YAxisLabels();
 
   @override
@@ -305,10 +305,10 @@ class _YAxisLabels extends StatelessWidget {
   static const _style = TextStyle(fontSize: 9, color: G20Colors.textSecondaryDark);
 }
 
-class _XAxisLabels extends StatelessWidget {   
+class _XAxisLabels extends StatelessWidget {
   final double centerFreqMHz;
   final double bandwidthMHz;
-  
+
   const _XAxisLabels({required this.centerFreqMHz, required this.bandwidthMHz});
 
   @override
@@ -402,7 +402,7 @@ class _DetectionOverlays extends ConsumerWidget {
       if (!isVisible) continue;
 
       final bands = bandsByClass.putIfAbsent(det.className, () => []);
-      
+
       // Try to merge with existing band
       bool merged = false;
       for (final band in bands) {
@@ -411,7 +411,7 @@ class _DetectionOverlays extends ConsumerWidget {
           break;
         }
       }
-      
+
       // No overlap found - create new band
       if (!merged) {
         bands.add(_DetectionBand(
@@ -429,16 +429,16 @@ class _DetectionOverlays extends ConsumerWidget {
     for (final entry in bandsByClass.entries) {
       final className = entry.key;
       final color = getSOIColor(className);
-      
+
       for (final band in entry.value) {
         // Add small padding to each band
         final detWidth = band.y2 - band.y1;
         final freqPadding = detWidth * 0.1;  // 10% padding (reduced from 20%)
         final paddedY1 = (band.y1 - freqPadding).clamp(0.0, 1.0);
         final paddedY2 = (band.y2 + freqPadding).clamp(0.0, 1.0);
-        
+
         // Flip: y2 becomes left, y1 becomes right
-        final left = (1.0 - paddedY2) * plotWidth;       
+        final left = (1.0 - paddedY2) * plotWidth;
         final right = (1.0 - paddedY1) * plotWidth;
         final width = right - left;
 
@@ -448,12 +448,12 @@ class _DetectionOverlays extends ConsumerWidget {
         // More visible when selected
         final borderWidth = band.isSelected ? 2.0 : 1.5;
         final opacity = band.isSelected ? 0.9 : 0.7;
-        
+
         widgets.add(
           Positioned(
             left: left,
             top: 0,
-            width: width.clamp(3.0, plotWidth),  
+            width: width.clamp(3.0, plotWidth),
             height: plotHeight,
             child: Container(
               decoration: BoxDecoration(

@@ -12,16 +12,16 @@ import '../models/mission_config.dart';
 class MissionState {
   /// Currently active mission configuration
   final MissionConfig? activeMission;
-  
+
   /// List of available mission files (paths)
   final List<String> availableMissions;
-  
+
   /// Whether we're currently loading
   final bool isLoading;
-  
+
   /// Error message if any
   final String? error;
-  
+
   /// Path to the missions directory
   final String missionsDir;
 
@@ -70,16 +70,16 @@ class MissionNotifier extends StateNotifier<MissionState> {
   /// Get the absolute path to the missions directory
   String get _missionsPath {
     // Get the executable directory or current directory
-    final execDir = Platform.resolvedExecutable.isNotEmpty 
+    final execDir = Platform.resolvedExecutable.isNotEmpty
         ? path.dirname(Platform.resolvedExecutable)
         : Directory.current.path;
-    
+
     // For development, check if we're in the project directory
     final projectMissionsDir = path.join(Directory.current.path, state.missionsDir);
     if (Directory(projectMissionsDir).existsSync()) {
       return projectMissionsDir;
     }
-    
+
     // Fall back to relative to executable
     return path.join(execDir, state.missionsDir);
   }
@@ -87,25 +87,25 @@ class MissionNotifier extends StateNotifier<MissionState> {
   /// Scan the missions directory for available mission files
   Future<void> scanMissions() async {
     state = state.copyWith(isLoading: true, error: null);
-    
+
     try {
       final dir = Directory(_missionsPath);
-      
+
       if (!await dir.exists()) {
         await dir.create(recursive: true);
         debugPrint('[MissionProvider] Created missions directory: $_missionsPath');
       }
-      
+
       final files = await dir.list()
           .where((entity) => entity is File && entity.path.endsWith('.mission.yaml'))
           .map((entity) => entity.path)
           .toList();
-      
+
       // Sort alphabetically
       files.sort((a, b) => path.basename(a).compareTo(path.basename(b)));
-      
+
       debugPrint('[MissionProvider] Found ${files.length} mission files in $_missionsPath');
-      
+
       state = state.copyWith(
         availableMissions: files,
         isLoading: false,
@@ -122,17 +122,17 @@ class MissionNotifier extends StateNotifier<MissionState> {
   /// Load a mission from file
   Future<bool> loadMission(String filePath) async {
     state = state.copyWith(isLoading: true, error: null);
-    
+
     try {
       final mission = await MissionConfig.loadFromFile(filePath);
-      
+
       debugPrint('[MissionProvider] Loaded mission: ${mission.name} from $filePath');
-      
+
       state = state.copyWith(
         activeMission: mission,
         isLoading: false,
       );
-      
+
       return true;
     } catch (e) {
       debugPrint('[MissionProvider] Error loading mission: $e');
@@ -151,9 +151,9 @@ class MissionNotifier extends StateNotifier<MissionState> {
       state = state.copyWith(error: 'No active mission to save');
       return false;
     }
-    
+
     state = state.copyWith(isLoading: true, error: null);
-    
+
     try {
       final savePath = newPath ?? mission.filePath;
       if (savePath == null) {
@@ -163,25 +163,25 @@ class MissionNotifier extends StateNotifier<MissionState> {
         );
         return false;
       }
-      
+
       // Update modified timestamp
       final updatedMission = mission.copyWith(
         modified: DateTime.now(),
         filePath: savePath,
       );
-      
+
       await updatedMission.saveToFile(savePath);
-      
+
       debugPrint('[MissionProvider] Saved mission to $savePath');
-      
+
       state = state.copyWith(
         activeMission: updatedMission,
         isLoading: false,
       );
-      
+
       // Rescan to pick up any new files
       await scanMissions();
-      
+
       return true;
     } catch (e) {
       debugPrint('[MissionProvider] Error saving mission: $e');
@@ -199,17 +199,17 @@ class MissionNotifier extends StateNotifier<MissionState> {
     String description = '',
   }) async {
     final now = DateTime.now();
-    
+
     // Generate filename from name
     final fileName = '${name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}.mission.yaml';
     final filePath = path.join(_missionsPath, fileName);
-    
+
     // Check if file already exists
     if (File(filePath).existsSync()) {
       state = state.copyWith(error: 'Mission file already exists: $fileName');
       return;
     }
-    
+
     final newMission = MissionConfig.defaultConfig().copyWith(
       name: name,
       description: description,
@@ -217,11 +217,11 @@ class MissionNotifier extends StateNotifier<MissionState> {
       modified: now,
       filePath: filePath,
     );
-    
+
     state = state.copyWith(
       activeMission: newMission,
     );
-    
+
     // Save immediately
     await saveMission();
   }
@@ -233,30 +233,30 @@ class MissionNotifier extends StateNotifier<MissionState> {
       state = state.copyWith(error: 'No active mission to duplicate');
       return;
     }
-    
+
     final now = DateTime.now();
-    
+
     // Generate filename from name
     final fileName = '${newName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}.mission.yaml';
     final filePath = path.join(_missionsPath, fileName);
-    
+
     // Check if file already exists
     if (File(filePath).existsSync()) {
       state = state.copyWith(error: 'Mission file already exists: $fileName');
       return;
     }
-    
+
     final duplicated = current.copyWith(
       name: newName,
       created: now,
       modified: now,
       filePath: filePath,
     );
-    
+
     state = state.copyWith(
       activeMission: duplicated,
     );
-    
+
     // Save immediately
     await saveMission();
   }
@@ -268,12 +268,12 @@ class MissionNotifier extends StateNotifier<MissionState> {
       if (await file.exists()) {
         await file.delete();
         debugPrint('[MissionProvider] Deleted mission: $filePath');
-        
+
         // If we deleted the active mission, clear it
         if (state.activeMission?.filePath == filePath) {
           state = state.copyWith(activeMission: null);
         }
-        
+
         // Rescan
         await scanMissions();
         return true;
@@ -290,7 +290,7 @@ class MissionNotifier extends StateNotifier<MissionState> {
   void updateActiveMission(MissionConfig Function(MissionConfig) updater) {
     final current = state.activeMission;
     if (current == null) return;
-    
+
     state = state.copyWith(
       activeMission: updater(current),
     );
@@ -303,7 +303,7 @@ class MissionNotifier extends StateNotifier<MissionState> {
   }) {
     final current = state.activeMission;
     if (current == null) return;
-    
+
     state = state.copyWith(
       activeMission: updater(current, value),
     );
@@ -337,24 +337,24 @@ final missionApplierProvider = Provider<void>((ref) {
   // Watch for mission changes
   ref.listen<MissionState>(missionProvider, (previous, next) {
     final mission = next.activeMission;
-    
+
     // If mission cleared, log it
     if (mission == null && previous?.activeMission != null) {
       debugPrint('[MissionApplier] Mission cleared');
       return;
     }
-    
+
     if (mission == null) return;
-    
+
     // Only log if mission actually changed
     if (previous?.activeMission?.filePath == mission.filePath &&
         previous?.activeMission?.modified == mission.modified) {
       return;
     }
-    
+
     debugPrint('[MissionApplier] Mission changed: ${mission.name}');
     debugPrint('[MissionApplier] Effective signals: ${mission.effectiveSignals}');
-    
+
     // Note: Actual head loading is handled by missionHeadLoaderProvider
     // in lib/features/live_detection/providers/mission_head_loader_provider.dart
   });

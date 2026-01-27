@@ -95,7 +95,7 @@ class Detection {
 /// Detections come from gRPC inference stream or manual adds
 class DetectionNotifier extends StateNotifier<List<Detection>> {
   DetectionNotifier() : super([]);
-  
+
   // Call this to load mock data for testing without backend
   void loadMockData() {
     _addMockDetections();
@@ -215,7 +215,7 @@ class DetectionNotifier extends StateNotifier<List<Detection>> {
         trackId: 8,
       ),
     ];
-    
+
     state = mockDetections;
   }
 
@@ -278,7 +278,7 @@ class DetectionNotifier extends StateNotifier<List<Detection>> {
 
   /// Remove detections that have scrolled off based on absolute row position
   /// This is the preferred method for PSD box lifecycle management
-  /// 
+  ///
   /// [currentRow] - The current total rows received (bottom of waterfall)
   /// [bufferHeight] - The visible buffer height in rows
   void pruneByAbsoluteRow(int currentRow, int bufferHeight) {
@@ -333,7 +333,7 @@ Detection _createUnkDetection({
 }) {
   // Generate className as unk_DTG_freqMHz
   final className = generateUnkFilename(timestamp, freqMHz.toStringAsFixed(1));
-  
+
   return Detection(
     id: id,
     classId: 0,
@@ -358,12 +358,12 @@ Detection _createUnkDetection({
 Detection convertVideoDetection(video_stream.VideoDetection vd, double pts) {
   const centerFreqMHz = 825.0;
   const bandwidthMHz = 20.0;
-  
+
   // Calculate frequency from normalized y coordinates (frequency axis)
   final freqStart = centerFreqMHz - (bandwidthMHz / 2);
   final freqMHz = freqStart + ((vd.y1 + vd.y2) / 2) * bandwidthMHz;
   final detBandwidthMHz = (vd.y2 - vd.y1) * bandwidthMHz;
-  
+
   return Detection(
     id: 'vid_${vd.detectionId}_${pts.toStringAsFixed(2)}',
     classId: vd.classId,

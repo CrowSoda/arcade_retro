@@ -16,7 +16,7 @@ class MessageType {
   static const int strip = 0x01;      // Row strip data
   static const int detection = 0x02;  // Detection JSON
   static const int metadata = 0x03;   // Stream metadata
-  
+
   // Alias for compatibility
   static const int videoFrame = strip;
 }
@@ -45,7 +45,7 @@ extension WaterfallSourceExtension on WaterfallSource {
         return 'MANUAL';
     }
   }
-  
+
   /// Whether this source indicates active recording
   bool get isRecording => this != WaterfallSource.rx1Scanning;
 }
@@ -84,7 +84,7 @@ class StreamMetadata {
 
   bool get isRowStripMode => mode == 'row_strip';
   bool get isJpeg => encoder == 'image/jpeg';
-  
+
   @override
   String toString() => 'StreamMetadata(mode=$mode, ${stripWidth}×$rowsPerStrip strips, buffer=$suggestedBufferHeight)';
 }
@@ -119,7 +119,7 @@ class VideoDetection {
   factory VideoDetection.fromJson(Map<String, dynamic> json, double pts, {int baseRow = 0, int rowsInFrame = 38}) {
     final rowOffset = json['row_offset'] as int? ?? 0;
     final rowSpan = json['row_span'] as int? ?? 1;
-    
+
     return VideoDetection(
       detectionId: json['detection_id'] ?? 0,
       x1: (json['x1'] ?? 0).toDouble(),
@@ -134,7 +134,7 @@ class VideoDetection {
       rowSpan: rowSpan > 0 ? rowSpan : 1,
     );
   }
-  
+
   VideoDetection copyWith({bool? isSelected}) {
     return VideoDetection(
       detectionId: detectionId,
@@ -155,25 +155,25 @@ class VideoStreamState {
   final bool isConnected;
   final bool isConnecting;
   final StreamMetadata? metadata;
-  
+
   // ROW-STRIP MODE: Local pixel buffer maintained by Flutter
   final Uint8List? pixelBuffer;  // RGBA pixel buffer (width × bufferHeight × 4)
   final int bufferWidth;         // Width of pixel buffer (2048)
   final int bufferHeight;        // Height of pixel buffer (suggested by backend)
-  
+
   final List<VideoDetection> detections;
   final double currentPts;
   final int frameCount;
   final String? error;
   final double fps;
-  
+
   // ROW SYNC: Row-based tracking
   final int totalRowsReceived;  // Monotonic counter
   final int rowsPerStrip;       // Rows per strip (~38)
-  
+
   // PSD data for the line graph at bottom of screen
   final Float32List? psd;       // Raw dB values for PSD chart
-  
+
   // Waterfall source indicator - which RX stream is feeding the display
   final WaterfallSource waterfallSource;
 
@@ -194,7 +194,7 @@ class VideoStreamState {
     this.psd,
     this.waterfallSource = WaterfallSource.rx1Scanning,
   });
-  
+
   /// Whether the waterfall is showing a recording stream (not just scanning)
   bool get isRecording => waterfallSource.isRecording;
 
@@ -233,7 +233,7 @@ class VideoStreamState {
       waterfallSource: waterfallSource ?? this.waterfallSource,
     );
   }
-  
+
   static VideoStreamState initial() => const VideoStreamState();
 }
 
@@ -245,24 +245,24 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   DetectionCallback? _onDetections;
-  
+
   // Local pixel buffer for stitching strips
   Uint8List? _pixelBuffer;
   int _bufferWidth = 2048;
   int _bufferHeight = 2850;  // Default: 2.5s × 30fps × 38 rows
   static const int _bytesPerPixel = 4;  // RGBA
-  
+
   // FPS calculation
   DateTime? _lastFrameTime;
   int _fpsFrameCount = 0;
   double _measuredFps = 0.0;
-  
+
   // Detection buffer
   List<VideoDetection> _detectionBuffer = [];
   double _currentTimeSpan = 5.0;
-  
+
   VideoStreamNotifier() : super(VideoStreamState.initial());
-  
+
   void setDetectionCallback(DetectionCallback callback) {
     _onDetections = callback;
   }
@@ -272,30 +272,30 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     if (_pixelBuffer != null && _bufferWidth == width && _bufferHeight == height) {
       return;  // Already correct size
     }
-    
+
     debugPrint('[VideoStream] Initializing pixel buffer: ${width}×$height (${(width * height * _bytesPerPixel / 1024 / 1024).toStringAsFixed(1)} MB)');
-    
+
     _bufferWidth = width;
     _bufferHeight = height;
     _pixelBuffer = Uint8List(width * height * _bytesPerPixel);
-    
+
     // Initialize with viridis dark purple (68, 1, 84, 255)
     _fillWithViridisBackground();
-    
+
     state = state.copyWith(
       pixelBuffer: _pixelBuffer,
       bufferWidth: width,
       bufferHeight: height,
     );
   }
-  
+
   /// Clear pixel buffer to viridis dark purple background
   /// Called when waterfall source changes to prevent mixing old/new data
   void _clearPixelBuffer() {
     if (_pixelBuffer == null) return;
     _fillWithViridisBackground();
   }
-  
+
   /// Fill buffer with viridis dark purple (68, 1, 84, 255)
   void _fillWithViridisBackground() {
     if (_pixelBuffer == null) return;
@@ -311,16 +311,16 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     if (state.isConnected || state.isConnecting) {
       return;
     }
-    
+
     state = state.copyWith(isConnecting: true, error: null);
-    
+
     // Use runZonedGuarded to catch async errors that escape try-catch
     await runZonedGuarded(() async {
       try {
         final url = 'ws://$host:$port/ws/video';
 
         _channel = WebSocketChannel.connect(Uri.parse(url));
-        
+
         // Wait for connection to establish (catches SocketException here)
         await _channel!.ready;
 
@@ -407,7 +407,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   void _handleStrip(Uint8List data) {
     // PERF TIMING: Measure strip handling time
     final stopwatch = Stopwatch()..start();
-    
+
     // Skip first frame if setting is enabled (avoids garbage/initialization data)
     if (_skipFirstFrame && !_firstFrameReceived) {
       _firstFrameReceived = true;
@@ -415,7 +415,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       return;
     }
     _firstFrameReceived = true;  // Mark as received either way
-    
+
     // Parse binary header (17 bytes):
     // - frame_id: uint32 (4 bytes)
     // - total_rows: uint32 (4 bytes)
@@ -423,12 +423,12 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     // - strip_width: uint16 (2 bytes)
     // - pts: float32 (4 bytes)
     // - source_id: uint8 (1 byte) - 0=SCAN, 1=RX1_REC, 2=RX2_REC, 3=MANUAL
-    
+
     if (data.length < 17) {
       debugPrint('[VideoStream] Strip too short: ${data.length} bytes');
       return;
     }
-    
+
     final header = ByteData.sublistView(data, 0, 17);
     // final frameId = header.getUint32(0, Endian.little);
     final totalRows = header.getUint32(4, Endian.little);
@@ -436,27 +436,27 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     final stripWidth = header.getUint16(10, Endian.little);
     final pts = header.getFloat32(12, Endian.little);
     final sourceId = header.getUint8(16);  // Waterfall source indicator
-    
+
     // Parse source ID to enum (clamp to valid range)
     final newSource = WaterfallSource.values[sourceId.clamp(0, WaterfallSource.values.length - 1)];
-    
+
     // Check if source changed - clear buffer to prevent mixing old/new data
     if (newSource != state.waterfallSource && _pixelBuffer != null) {
       debugPrint('[VideoStream] Source changed: ${state.waterfallSource.label} -> ${newSource.label}, clearing buffer');
       _clearPixelBuffer();
       _detectionBuffer.clear();
     }
-    
+
     // Extract RGBA pixel data
     final expectedRgbaBytes = rowsInStrip * stripWidth * _bytesPerPixel;
-    
+
     if (data.length < 17 + expectedRgbaBytes) {
       debugPrint('[VideoStream] Strip pixel data too short: ${data.length} < ${17 + expectedRgbaBytes}');
       return;
     }
-    
+
     final pixelData = data.sublist(17, 17 + expectedRgbaBytes);
-    
+
     // Extract PSD dB values (Float32, after RGBA data)
     // NOTE: Must copy to aligned buffer since 17-byte header breaks 4-byte alignment
     final psdStart = 17 + expectedRgbaBytes;
@@ -469,12 +469,12 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       alignedBuffer.setAll(0, psdBytes);
       psdData = Float32List.view(alignedBuffer.buffer);
     }
-    
+
     // Initialize buffer if needed
     if (_pixelBuffer == null) {
       _initPixelBuffer(stripWidth, state.metadata?.suggestedBufferHeight ?? 5700);
     }
-    
+
 
     final now = DateTime.now();
     if (_lastFrameTime != null) {
@@ -488,25 +488,25 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     } else {
       _lastFrameTime = now;
     }
-    
+
     // SCROLL: Move buffer up by rowsInStrip rows
     final bytesPerRow = _bufferWidth * _bytesPerPixel;
     final shiftBytes = rowsInStrip * bytesPerRow;
-    
+
     if (shiftBytes < _pixelBuffer!.length) {
       // Shift existing data up (oldest at top, newest at bottom)
-      _pixelBuffer!.setRange(0, _pixelBuffer!.length - shiftBytes, 
+      _pixelBuffer!.setRange(0, _pixelBuffer!.length - shiftBytes,
           _pixelBuffer!.sublist(shiftBytes));
-      
+
       // PASTE: Copy new strip to bottom of buffer
       final bottomStart = _pixelBuffer!.length - shiftBytes;
       _pixelBuffer!.setRange(bottomStart, bottomStart + expectedRgbaBytes, pixelData);
     }
-    
+
     // Cull old detections
     final cutoffRow = totalRows - _bufferHeight;
     _detectionBuffer = _detectionBuffer.where((d) => d.absoluteRow >= cutoffRow).toList();
-    
+
     // Update state with PSD data and waterfall source
     state = state.copyWith(
       pixelBuffer: _pixelBuffer,
@@ -519,7 +519,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       psd: psdData,
       waterfallSource: newSource,  // Update source indicator
     );
-    
+
     // PERF TIMING: Print every 30 frames
     stopwatch.stop();
     if (state.frameCount % 30 == 0) {
@@ -534,7 +534,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
       final pts = (data['pts'] ?? 0).toDouble();
       final detList = (data['detections'] as List<dynamic>?) ?? [];
-      
+
       final baseRow = data['base_row'] as int? ?? state.totalRowsReceived;
       final rowsInFrame = data['rows_in_frame'] as int? ?? 38;
 
@@ -548,12 +548,12 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
           .toList();
 
       _detectionBuffer.addAll(newDetections);
-      
+
       state = state.copyWith(
         detections: List.from(_detectionBuffer),
         currentPts: pts,
       );
-      
+
       if (_onDetections != null && newDetections.isNotEmpty) {
         _onDetections!(newDetections, pts);
       }
@@ -569,12 +569,12 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
       final metadata = StreamMetadata.fromJson(data);
       debugPrint('[VideoStream] Metadata: $metadata');
-      
+
       // ROW-STRIP MODE: Initialize pixel buffer with suggested size
       if (metadata.isRowStripMode) {
         _initPixelBuffer(metadata.stripWidth, metadata.suggestedBufferHeight);
       }
-      
+
       state = state.copyWith(
         metadata: metadata,
         rowsPerStrip: metadata.rowsPerStrip,
@@ -593,7 +593,7 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
     debugPrint('[VideoStream] Connection closed');
     state = state.copyWith(isConnected: false);
   }
-  
+
   void selectDetection(int detectionId) {
     final newDetections = state.detections.map((d) {
       if (d.detectionId == detectionId) {
@@ -601,25 +601,25 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       }
       return d.copyWith(isSelected: false);
     }).toList();
-    
+
     state = state.copyWith(detections: newDetections);
   }
 
   void setTimeSpan(double seconds) {
     debugPrint('[VideoStream] setTimeSpan: $seconds');
-    
+
     _currentTimeSpan = seconds;
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot set time span - not connected');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'set_time_span',
       'seconds': seconds,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent time span command: ${seconds}s');
@@ -630,17 +630,17 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
   void setFps(int fps) {
     debugPrint('[VideoStream] setFps: $fps');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot set FPS - not connected');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'set_fps',
       'fps': fps,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent FPS command: ${fps}fps');
@@ -651,17 +651,17 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
 
   void setScoreThreshold(double threshold) {
     debugPrint('[VideoStream] setScoreThreshold: $threshold');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot set score threshold - not connected');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'set_score_threshold',
       'threshold': threshold,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent score threshold command: ${(threshold * 100).toInt()}%');
@@ -675,24 +675,24 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   /// NOTE: Backend will warmup cuFFT kernels (100-500ms delay)
   void setFftSize(int size) {
     debugPrint('[VideoStream] setFftSize: $size');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot set FFT size - not connected');
       return;
     }
-    
+
     // Validate size
     const validSizes = [8192, 16384, 32768, 65536];
     if (!validSizes.contains(size)) {
       debugPrint('[VideoStream] Invalid FFT size: $size. Valid: $validSizes');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'set_fft_size',
       'size': size,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent FFT size command: $size (warmup may take 100-500ms)');
@@ -706,18 +706,18 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   /// maxDb: peak level (e.g., -20)
   void setDbRange(double minDb, double maxDb) {
     debugPrint('[VideoStream] setDbRange: $minDb to $maxDb dB');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot set dB range - not connected');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'set_db_range',
       'min_db': minDb,
       'max_db': maxDb,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent dB range command: $minDb to $maxDb dB');
@@ -742,20 +742,20 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   /// 0=Viridis, 1=Plasma, 2=Inferno, 3=Magma, 4=Turbo
   void setColormap(int colormapIndex) {
     debugPrint('[VideoStream] setColormap: $colormapIndex');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot set colormap - not connected');
       return;
     }
-    
+
     // Clamp to valid range
     final index = colormapIndex.clamp(0, 4);
-    
+
     final msg = json.encode({
       'command': 'set_colormap',
       'colormap': index,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent colormap command: $index');
@@ -767,28 +767,28 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
   // =========================================================================
   // HEAD MANAGEMENT - Dynamic signal detector loading for Hydra architecture
   // =========================================================================
-  
+
   /// Load detection heads for specified signals
   /// Call this when starting a mission to enable detection
   /// Returns loaded head names via callback (heads_loaded message)
   void loadHeads(List<String> signalNames) {
     debugPrint('[VideoStream] loadHeads: $signalNames');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot load heads - not connected');
       return;
     }
-    
+
     if (signalNames.isEmpty) {
       debugPrint('[VideoStream] No signals to load');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'load_heads',
       'signal_names': signalNames,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent load_heads: $signalNames');
@@ -796,22 +796,22 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       debugPrint('[VideoStream] Send FAILED: $e');
     }
   }
-  
+
   /// Unload detection heads to free GPU memory
   /// Pass specific names or null to unload ALL heads
   void unloadHeads([List<String>? signalNames]) {
     debugPrint('[VideoStream] unloadHeads: ${signalNames ?? 'ALL'}');
-    
+
     if (_channel == null) {
       debugPrint('[VideoStream] Cannot unload heads - not connected');
       return;
     }
-    
+
     final msg = json.encode({
       'command': 'unload_heads',
       if (signalNames != null) 'signal_names': signalNames,
     });
-    
+
     try {
       _channel!.sink.add(msg);
       debugPrint('[VideoStream] Sent unload_heads');
@@ -819,19 +819,19 @@ class VideoStreamNotifier extends StateNotifier<VideoStreamState> {
       debugPrint('[VideoStream] Send FAILED: $e');
     }
   }
-  
+
   /// Query currently loaded heads
   void getLoadedHeads() {
     if (_channel == null) return;
-    
+
     final msg = json.encode({'command': 'get_loaded_heads'});
     _channel!.sink.add(msg);
   }
-  
+
   /// Query all available trained signals
   void getAvailableSignals() {
     if (_channel == null) return;
-    
+
     final msg = json.encode({'command': 'get_available_signals'});
     _channel!.sink.add(msg);
   }

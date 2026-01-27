@@ -21,25 +21,25 @@ final wsPortProvider = Provider<int?>((ref) {
 /// Unified pipeline manager provider - singleton
 final unifiedPipelineManagerProvider = Provider<UnifiedPipelineManager?>((ref) {
   ref.keepAlive();  // Don't auto-dispose!
-  
+
   final backendState = ref.read(backendLauncherProvider);
-  
+
   if (backendState.wsPort == null) {
     debugPrint('[InferenceProvider] WebSocket port not yet discovered');
     return null;
   }
-  
+
   debugPrint('[InferenceProvider] Creating UnifiedPipelineManager with wsPort: ${backendState.wsPort}');
   final manager = UnifiedPipelineManager(
     host: 'localhost',
     port: backendState.wsPort!,
   );
-  
+
   ref.onDispose(() {
     debugPrint('[InferenceProvider] Disposing UnifiedPipelineManager');
     manager.dispose();
   });
-  
+
   return manager;
 });
 
@@ -84,10 +84,10 @@ class UnifiedInferenceNotifier extends StateNotifier<LiveInferenceState> {
       // Connect waterfall provider to pipeline
       final waterfallNotifier = _ref.read(waterfallProvider.notifier);
       waterfallNotifier.connectToPipeline(manager);
-      
+
       // Subscribe to detection frames
       _detectionSub = manager.detections.listen(_handleDetectionFrame);
-      
+
       state = LiveInferenceState.running;
       debugPrint('[UnifiedInference] Pipeline started');
       return true;
@@ -101,10 +101,10 @@ class UnifiedInferenceNotifier extends StateNotifier<LiveInferenceState> {
   void _handleDetectionFrame(DetectionFrame frame) {
     _frameCount++;
     final detectionPts = frame.pts;
-    
+
     // Get current score threshold from settings
     final scoreThreshold = _ref.read(scoreThresholdProvider);
-    
+
     // Convert detections with PTS for waterfall scrolling
     // Filter by confidence threshold
     final detections = frame.detections.map((d) {
@@ -112,12 +112,12 @@ class UnifiedInferenceNotifier extends StateNotifier<LiveInferenceState> {
       if (d.x2 <= d.x1 || d.y2 <= d.y1) {
         return null;
       }
-      
+
       // Filter by confidence threshold
       if (d.confidence < scoreThreshold) {
         return null;
       }
-      
+
       return det.Detection(
         id: 'det_${frame.frameId}_${d.detectionId}',
         classId: d.classId,
@@ -138,20 +138,20 @@ class UnifiedInferenceNotifier extends StateNotifier<LiveInferenceState> {
     }).whereType<det.Detection>().toList();
 
     final notifier = _ref.read(det.detectionProvider.notifier);
-    
+
     // Get current PTS from waterfall
     final waterfallState = _ref.read(waterfallProvider);
     final currentPts = waterfallState.currentPts;
-    
+
     // Get time span from settings and prune old detections
     final timeSpan = _ref.read(waterfallTimeSpanProvider);
     notifier.pruneByPts(currentPts, displayTimeSpan: timeSpan);
-    
+
     // Add new detections (don't clear - they persist and scroll!)
     if (detections.isNotEmpty) {
       notifier.addDetections(detections);
       debugPrint('[Inference] +${detections.length} @ PTS ${detectionPts.toStringAsFixed(1)}s');
-      
+
       // Log detailed detection records to database for high-confidence detections
       final dbNotifier = _ref.read(signalDatabaseProvider.notifier);
       for (final detection in detections) {
@@ -201,16 +201,16 @@ final unifiedInferenceProvider =
 final autoStartUnifiedProvider = Provider<void>((ref) {
   // Track if we've already started (prevents multiple starts)
   var hasStarted = false;
-  
+
   // Listen for backend state changes
   ref.listen<BackendLauncherState>(backendLauncherProvider, (previous, next) {
     // Only auto-start once when backend becomes ready
-    if (!hasStarted && 
-        next.state == BackendState.running && 
+    if (!hasStarted &&
+        next.state == BackendState.running &&
         next.wsPort != null) {
       hasStarted = true;
       debugPrint('[AutoStart] Backend ready with wsPort: ${next.wsPort}');
-      
+
       // Use Timer instead of Future.delayed to avoid closure issues
       Timer(const Duration(milliseconds: 500), () {
         // Safe to read here because we're in a timer callback, not provider build
@@ -226,7 +226,7 @@ final autoStartUnifiedProvider = Provider<void>((ref) {
       });
     }
   }, fireImmediately: true);
-  
+
   return;
 });
 
@@ -235,14 +235,14 @@ final autoStartUnifiedProvider = Provider<void>((ref) {
 final inferenceManagerProvider = Provider<InferenceManager?>((ref) {
   ref.keepAlive();
   final backendState = ref.read(backendLauncherProvider);
-  
+
   if (backendState.wsPort == null) return null;
-  
+
   final manager = InferenceManager(
     host: 'localhost',
     port: backendState.wsPort!,
   );
-  
+
   ref.onDispose(() => manager.dispose());
   return manager;
 });
@@ -250,12 +250,12 @@ final inferenceManagerProvider = Provider<InferenceManager?>((ref) {
 class LiveInferenceNotifier extends StateNotifier<LiveInferenceState> {
   LiveInferenceNotifier(this._ref) : super(LiveInferenceState.stopped);
   final Ref _ref;
-  
+
   Future<bool> start({double scoreThreshold = 0.9}) async {
     // Delegate to unified provider
     return _ref.read(unifiedInferenceProvider.notifier).start();
   }
-  
+
   Future<void> stop() async {
     return _ref.read(unifiedInferenceProvider.notifier).stop();
   }

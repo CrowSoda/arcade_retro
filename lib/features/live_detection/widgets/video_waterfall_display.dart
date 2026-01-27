@@ -18,7 +18,7 @@ import '../../settings/settings_screen.dart' show waterfallTimeSpanProvider, wat
 /// Waterfall display using row-strip streaming
 class VideoWaterfallDisplay extends ConsumerStatefulWidget {
   final String host;
-  
+
   const VideoWaterfallDisplay({
     super.key,
     this.host = 'localhost',
@@ -49,7 +49,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
   void _tryConnect(int port) {
     if (_hasAttemptedConnect) return;
     _hasAttemptedConnect = true;
-    
+
     final notifier = ref.read(videoStreamProvider.notifier);
     notifier.connect(widget.host, port);
   }
@@ -57,9 +57,9 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
   /// Convert RGBA pixel buffer to ui.Image for rendering
   Future<ui.Image?> _createImageFromPixels(Uint8List pixels, int width, int height) async {
     if (pixels.isEmpty || width <= 0 || height <= 0) return null;
-    
+
     final completer = Completer<ui.Image>();
-    
+
     ui.decodeImageFromPixels(
       pixels,
       width,
@@ -67,7 +67,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
       ui.PixelFormat.rgba8888,
       (image) => completer.complete(image),
     );
-    
+
     return completer.future;
   }
 
@@ -75,7 +75,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
   Widget build(BuildContext context) {
     final streamState = ref.watch(videoStreamProvider);
     final backendState = ref.watch(backendLauncherProvider);
-    
+
     // Listen for time span changes and send to backend
     ref.listen<double>(waterfallTimeSpanProvider, (previous, next) {
       final currentState = ref.read(videoStreamProvider);
@@ -83,7 +83,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
         ref.read(videoStreamProvider.notifier).setTimeSpan(next);
       }
     });
-    
+
     // Listen for FPS changes and send to backend
     ref.listen<int>(waterfallFpsProvider, (previous, next) {
       final currentState = ref.read(videoStreamProvider);
@@ -91,7 +91,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
         ref.read(videoStreamProvider.notifier).setFps(next);
       }
     });
-    
+
     // Send initial time span and FPS when connection state changes to connected
     ref.listen<VideoStreamState>(videoStreamProvider, (previous, next) {
       if (previous?.isConnected != true && next.isConnected) {
@@ -105,10 +105,10 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
         }
       }
     });
-    
+
     // Auto-connect when backend port is discovered
-    if (backendState.wsPort != null && 
-        !streamState.isConnected && 
+    if (backendState.wsPort != null &&
+        !streamState.isConnected &&
         !streamState.isConnecting &&
         !_hasAttemptedConnect) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -136,7 +136,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
             children: [
               // Background
               Container(color: G20Colors.surfaceDark),
-              
+
               // Waterfall image (rendered from pixel buffer) with long-press for manual capture
               Positioned(
                 left: plotRect.left,
@@ -155,10 +155,10 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
                   child: _buildWaterfall(streamState),
                 ),
               ),
-              
+
               // Manual capture drawing overlay
               _VideoDrawingOverlay(plotRect: plotRect),
-              
+
               // Detection overlay (row-index based positioning)
               Positioned(
                 left: plotRect.left,
@@ -192,7 +192,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
 
               // Connection status overlay
               if (!streamState.isConnected) _buildConnectionOverlay(streamState),
-              
+
               // Stats overlay (top-right corner) - controlled by settings toggle
               if (ref.watch(showStatsOverlayProvider))
                 Positioned(
@@ -209,7 +209,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
 
   Widget _buildWaterfall(VideoStreamState state) {
     final pixelBuffer = state.pixelBuffer;
-    
+
     if (pixelBuffer == null || pixelBuffer.isEmpty) {
       return Container(
         color: const Color(0xFF1A0033),
@@ -232,7 +232,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
     // Only rebuild image when frame count changes
     if (state.frameCount != _lastFrameCount) {
       _lastFrameCount = state.frameCount;
-      
+
       // DOUBLE-BUFFER: Create image async, don't block
       _createImageFromPixels(pixelBuffer, state.bufferWidth, state.bufferHeight)
           .then((newImage) {
@@ -248,7 +248,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
         }
       });
     }
-    
+
     // Always return current image (or placeholder)
     // Wrap in RepaintBoundary to isolate repaints from rest of tree
     if (_waterfallImage != null) {
@@ -260,14 +260,14 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
         ),
       );
     }
-    
+
     return Container(color: const Color(0xFF1A0033));
   }
 
   Widget _buildConnectionOverlay(VideoStreamState state) {
     final backendState = ref.watch(backendLauncherProvider);
     final port = backendState.wsPort;
-    
+
     return Positioned.fill(
       child: Container(
         color: Colors.black54,
@@ -326,11 +326,11 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
 
   Widget _buildStatsOverlay(VideoStreamState state) {
     if (!state.isConnected) return const SizedBox.shrink();
-    
+
     final isRecording = state.isRecording;
     final sourceLabel = state.waterfallSource.label;
     final bufferInfo = '${state.bufferWidth}×${state.bufferHeight}';
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -386,7 +386,7 @@ class _VideoWaterfallDisplayState extends ConsumerState<VideoWaterfallDisplay> {
       ),
     );
   }
-  
+
   /// Show duration selection dialog before entering drawing mode
   void _showCaptureDurationDialog(BuildContext context, WidgetRef ref, double centerFreqMHz) {
     showDialog(
@@ -410,7 +410,7 @@ class _CaptureDurationDialog extends ConsumerStatefulWidget {
 
 class _CaptureDurationDialogState extends ConsumerState<_CaptureDurationDialog> {
   int _durationMinutes = 1;  // Default 1 min
-  
+
   static const _durations = [1, 2, 5, 10];  // minutes
 
   @override
@@ -443,7 +443,7 @@ class _CaptureDurationDialogState extends ConsumerState<_CaptureDurationDialog> 
             style: const TextStyle(fontSize: 12, color: G20Colors.textSecondaryDark),
           ),
           const SizedBox(height: 16),
-          
+
           // Duration selector
           const Text('Capture Duration:', style: TextStyle(fontSize: 12, color: G20Colors.textPrimaryDark)),
           const SizedBox(height: 8),
@@ -455,7 +455,7 @@ class _CaptureDurationDialogState extends ConsumerState<_CaptureDurationDialog> 
               onTap: () => setState(() => _durationMinutes = d),
             )).toList(),
           ),
-          
+
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(8),
@@ -487,7 +487,7 @@ class _CaptureDurationDialogState extends ConsumerState<_CaptureDurationDialog> 
 
   void _startDrawingMode(BuildContext context) {
     Navigator.pop(context);
-    
+
     // Start drawing mode with selected duration
     ref.read(manualCaptureProvider.notifier).startDrawingMode(
       widget.centerFreqMHz.toStringAsFixed(2),
@@ -620,7 +620,7 @@ class _VideoFrequencyAxis extends StatelessWidget {
 int _waterfallDebugCounter = 0;
 
 /// Detection overlay layer with ROW-INDEX positioning
-/// 
+///
 /// Detection.absoluteRow = which row the detection was made at
 /// totalRowsReceived = current bottom row of the buffer
 /// Position: rowsAgo = totalRowsReceived - detection.absoluteRow
@@ -646,16 +646,16 @@ class _DetectionOverlayLayer extends ConsumerWidget {
         final plotWidth = constraints.maxWidth;
         final plotHeight = constraints.maxHeight;
         final pixelsPerRow = bufferHeight > 0 ? plotHeight / bufferHeight : 1.0;
-        
+
         final visibleBoxes = <Widget>[];
-        
+
         _waterfallDebugCounter++;
-        
+
         for (final det in detections) {
           // Check visibility toggle
           final isVisible = ref.watch(soiVisibilityProvider(det.className));
           if (!isVisible) continue;
-          
+
           // === FREQUENCY AXIS (X) - from y1/y2 with 20% padding ===
           // NOTE: Frequency axis is FLIPPED (1.0 - y) to match waterfall display
           final detWidth = det.y2 - det.y1;
@@ -666,29 +666,29 @@ class _DetectionOverlayLayer extends ConsumerWidget {
           final left = (1.0 - paddedY2) * plotWidth;
           final right = (1.0 - paddedY1) * plotWidth;
           final boxWidth = (right - left).abs().clamp(8.0, plotWidth);
-          
+
           // === TIME AXIS (Y) - ROW-INDEX positioning ===
           // How many rows ago was this detection?
           final rowsAgo = totalRowsReceived - det.absoluteRow;
-          
+
           // Skip if outside visible range
           if (rowsAgo < 0 || rowsAgo >= bufferHeight) continue;
-          
+
           // Box height from rowSpan - use model's actual output directly
           final boxHeight = det.rowSpan * pixelsPerRow;
-          
+
           // Y position: rowsAgo=0 → bottom, rowsAgo=bufferHeight → top
           final boxBottom = plotHeight - (rowsAgo * pixelsPerRow);
           final boxTop = boxBottom - boxHeight;
-          
+
           // Skip if outside visible area
           if (boxTop > plotHeight || boxBottom < 0) continue;
-          
+
           // Skip if too small
           if (boxWidth < 4) continue;
-          
+
           final color = getSOIColor(det.className);
-          
+
           visibleBoxes.add(
             Positioned(
               left: left.clamp(0.0, plotWidth - boxWidth),
@@ -702,7 +702,7 @@ class _DetectionOverlayLayer extends ConsumerWidget {
             ),
           );
         }
-        
+
         return Stack(
           clipBehavior: Clip.hardEdge,
           children: visibleBoxes,
@@ -748,7 +748,7 @@ class _VideoDrawingOverlay extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final captureState = ref.watch(manualCaptureProvider);
-    
+
     if (!captureState.isDrawing) {
       return const SizedBox.shrink();
     }
@@ -762,7 +762,7 @@ class _VideoDrawingOverlay extends ConsumerWidget {
         children: [
           // Semi-transparent overlay
           Container(color: Colors.black.withOpacity(0.3)),
-          
+
           // Gesture detector for drawing
           GestureDetector(
             onPanStart: (details) {
@@ -778,7 +778,7 @@ class _VideoDrawingOverlay extends ConsumerWidget {
             },
             child: Container(color: Colors.transparent),
           ),
-          
+
           // The drawn box (if any)
           if (captureState.hasPendingBox)
             _VideoDrawnBox(
@@ -788,7 +788,7 @@ class _VideoDrawingOverlay extends ConsumerWidget {
               y2: captureState.pendingBoxY2!,
               plotRect: plotRect,
             ),
-          
+
           // Instructions at top
           Positioned(
             top: 8,
@@ -802,7 +802,7 @@ class _VideoDrawingOverlay extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  captureState.hasPendingBox 
+                  captureState.hasPendingBox
                       ? (captureState.isCapturing ? 'Queue this capture?' : 'Start this capture?')
                       : 'Swipe left to right to select frequency range',
                   style: const TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
@@ -810,7 +810,7 @@ class _VideoDrawingOverlay extends ConsumerWidget {
               ),
             ),
           ),
-          
+
           // Action buttons at bottom
           if (captureState.hasPendingBox)
             Positioned(
@@ -874,7 +874,7 @@ class _PostDrawDurationDialog extends ConsumerStatefulWidget {
 class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog> {
   int _durationMinutes = 1;  // Default 1 min
   bool _extractNarrowband = true;  // Default: extract for training
-  
+
   static const _durations = [1, 2, 5, 10];  // minutes
   static const _sourceBandwidthHz = 20e6;  // 20 MHz capture bandwidth
 
@@ -882,24 +882,24 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
   double get boxCenterFreqMHz {
     final captureState = ref.read(manualCaptureProvider);
     final sdrConfig = ref.read(sdrConfigProvider);
-    
+
     if (!captureState.hasPendingBox) return widget.centerFreqMHz;
-    
+
     final x1 = captureState.pendingBoxX1!;
     final x2 = captureState.pendingBoxX2!;
     final boxCenterNorm = (x1 + x2) / 2;
-    
+
     final lowFreq = sdrConfig.centerFreqMHz - sdrConfig.bandwidthMHz / 2;
     final boxCenterFreq = lowFreq + (boxCenterNorm * sdrConfig.bandwidthMHz);
-    
+
     return boxCenterFreq;
   }
-  
+
   /// Calculate extraction parameters from drawn box
   Map<String, double> get extractionParams {
     final captureState = ref.read(manualCaptureProvider);
     final sdrConfig = ref.read(sdrConfigProvider);
-    
+
     if (!captureState.hasPendingBox) {
       return {
         'center_offset_hz': 0.0,
@@ -908,7 +908,7 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
         'decimation_ratio': 1.0,
       };
     }
-    
+
     final x1 = captureState.pendingBoxX1!;
     final x2 = captureState.pendingBoxX2!;
     final boxCenterNorm = (x1 + x2) / 2;
@@ -919,7 +919,7 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
     final outputRateHz = extractBandwidthHz * 2.5;
     final outputRateMHz = outputRateHz / 1e6;
     final decimationRatio = _sourceBandwidthHz / outputRateHz;
-    
+
     return {
       'center_offset_hz': centerOffsetHz,
       'bandwidth_hz': extractBandwidthHz,
@@ -932,7 +932,7 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
   Widget build(BuildContext context) {
     final captureState = ref.watch(manualCaptureProvider);
     final params = extractionParams;
-    
+
     return Dialog(
       backgroundColor: G20Colors.surfaceDark,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -966,9 +966,9 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 20),
-            
+
             // Duration selector - large touch-friendly buttons
             const Text('DURATION', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: G20Colors.textSecondaryDark)),
             const SizedBox(height: 10),
@@ -984,9 +984,9 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
                 ),
               )).toList(),
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Band mode toggle - single large button that transforms
             const Text('CAPTURE MODE', style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: G20Colors.textSecondaryDark)),
             const SizedBox(height: 10),
@@ -995,9 +995,9 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
               onToggle: () => setState(() => _extractNarrowband = !_extractNarrowband),
               narrowbandInfo: _extractNarrowband ? params : null,
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Queue info
             if (captureState.isCapturing)
               Container(
@@ -1020,9 +1020,9 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
                   ],
                 ),
               ),
-            
+
             const SizedBox(height: 20),
-            
+
             // Start button - large and prominent
             SizedBox(
               width: double.infinity,
@@ -1057,10 +1057,10 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
 
   void _startCapture(BuildContext context) {
     Navigator.pop(context);
-    
+
     final notifier = ref.read(manualCaptureProvider.notifier);
     notifier.setPendingDuration(_durationMinutes);
-    
+
     if (_extractNarrowband) {
       final params = extractionParams;
       notifier.setExtractionParams(
@@ -1075,7 +1075,7 @@ class _PostDrawDurationDialogState extends ConsumerState<_PostDrawDurationDialog
         extractSubband: false,
       );
     }
-    
+
     notifier.confirmAndStart();
   }
 }
@@ -1143,8 +1143,8 @@ class _BandModeToggle extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isNarrowband 
-              ? G20Colors.primary.withOpacity(0.15) 
+          color: isNarrowband
+              ? G20Colors.primary.withOpacity(0.15)
               : G20Colors.cardDark,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
@@ -1169,7 +1169,7 @@ class _BandModeToggle extends StatelessWidget {
                     child: const Text('FULL BAND', textAlign: TextAlign.center),
                   ),
                 ),
-                
+
                 // Toggle switch indicator
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
@@ -1193,7 +1193,7 @@ class _BandModeToggle extends StatelessWidget {
                     ),
                   ),
                 ),
-                
+
                 // Right label - Narrowband
                 Expanded(
                   child: AnimatedDefaultTextStyle(
@@ -1208,7 +1208,7 @@ class _BandModeToggle extends StatelessWidget {
                 ),
               ],
             ),
-            
+
             // Info row (only shown when narrowband is selected)
             AnimatedCrossFade(
               firstChild: const SizedBox(height: 0),
@@ -1305,4 +1305,3 @@ class _VideoDrawnBox extends StatelessWidget {
     );
   }
 }
-

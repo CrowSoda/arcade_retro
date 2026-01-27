@@ -18,16 +18,16 @@ List<List<int>> _buildViridisLut() {
     [210, 226, 42],   // 0.9 - yellow-green
     [253, 231, 37],   // 1.0 - yellow
   ];
-  
+
   return List.generate(256, (i) {
     final n = i / 255.0;
     final idx = (n * 10).clamp(0.0, 9.99);
     final ii = idx.floor();
     final t = idx - ii;
-    
+
     final c0 = colors[ii];
     final c1 = colors[ii + 1];
-    
+
     return [
       (c0[0] + t * (c1[0] - c0[0])).round(),
       (c0[1] + t * (c1[1] - c0[1])).round(),

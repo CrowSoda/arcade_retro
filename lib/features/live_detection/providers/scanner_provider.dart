@@ -1,6 +1,6 @@
 // lib/features/live_detection/providers/scanner_provider.dart
 /// Scanner provider - Steps through frequency ranges with dwell time
-/// 
+///
 /// Example: Range 2400-2480 MHz at 20 MHz BW, 5s dwell
 /// Step 1: 2410 MHz (2400-2420), wait 5s
 /// Step 2: 2430 MHz (2420-2440), wait 5s
@@ -29,7 +29,7 @@ class ScanStep {
     required this.rangeIndex,
     required this.stepInRange,
   });
-  
+
   @override
   String toString() => 'Step ${rangeIndex + 1}.${stepInRange + 1}: ${centerMHz.toInt()} MHz';
 }
@@ -52,13 +52,13 @@ class ScannerState {
     this.missionName,
   });
 
-  ScanStep? get currentStep => 
-      steps.isNotEmpty && currentStepIndex < steps.length 
-          ? steps[currentStepIndex] 
+  ScanStep? get currentStep =>
+      steps.isNotEmpty && currentStepIndex < steps.length
+          ? steps[currentStepIndex]
           : null;
 
   int get totalSteps => steps.length;
-  
+
   String get statusText {
     if (!isScanning) return 'IDLE';
     if (steps.isEmpty) return 'NO STEPS';
@@ -93,26 +93,26 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
   /// Load a mission and calculate all scan steps
   void loadMission(Mission mission) {
     stopScanning();
-    
+
     final steps = <ScanStep>[];
-    
+
     for (int rangeIdx = 0; rangeIdx < mission.freqRanges.length; rangeIdx++) {
       final range = mission.freqRanges[rangeIdx];
       final stepsForRange = _calculateStepsForRange(
-        range, 
-        mission.bandwidthMhz, 
+        range,
+        mission.bandwidthMhz,
         rangeIdx,
       );
       steps.addAll(stepsForRange);
     }
-    
+
     state = state.copyWith(
       steps: steps,
       currentStepIndex: 0,
       dwellTimeSec: mission.dwellTimeSec,
       missionName: mission.name,
     );
-    
+
     debugPrint('[Scanner] Loaded mission "${mission.name}" with ${steps.length} steps');
     for (final step in steps) {
       debugPrint('[Scanner]   $step');
@@ -123,22 +123,22 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
   List<ScanStep> _calculateStepsForRange(FreqRange range, double bandwidthMHz, int rangeIndex) {
     final steps = <ScanStep>[];
     final rangeWidth = range.endMhz - range.startMhz;
-    
+
     // Number of steps needed to cover the range
     // Each step covers `bandwidthMHz` of spectrum
     // Center of first step is at startMhz + bandwidthMHz/2
     final numSteps = (rangeWidth / bandwidthMHz).ceil();
-    
+
     for (int i = 0; i < numSteps; i++) {
       // Center frequency for this step
       // First step: startMhz + bw/2
       // Second step: startMhz + bw + bw/2
       // etc.
       final centerMHz = range.startMhz + (bandwidthMHz / 2) + (i * bandwidthMHz);
-      
+
       // Don't exceed end of range
       if (centerMHz - bandwidthMHz / 2 >= range.endMhz) break;
-      
+
       steps.add(ScanStep(
         centerMHz: centerMHz,
         bandwidthMHz: bandwidthMHz,
@@ -146,7 +146,7 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
         stepInRange: i,
       ));
     }
-    
+
     return steps;
   }
 
@@ -156,16 +156,16 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
       debugPrint('[Scanner] Cannot start - no steps loaded');
       return;
     }
-    
+
     state = state.copyWith(
       isScanning: true,
       currentStepIndex: 0,
       timeRemaining: state.dwellTimeSec,
     );
-    
+
     // Tune to first step immediately
     _tuneToCurrentStep();
-    
+
     // SINGLE FREQUENCY OPTIMIZATION: Don't start dwell timer if only one step
     // This avoids unnecessary API calls when there's nothing to scan through
     if (state.steps.length > 1) {
@@ -182,67 +182,67 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
     _countdownTimer?.cancel();
     _dwellTimer = null;
     _countdownTimer = null;
-    
+
     state = state.copyWith(
       isScanning: false,
       timeRemaining: 0,
     );
-    
+
     debugPrint('[Scanner] Stopped scanning');
   }
 
   /// Move to next step manually (or called by timer)
   void nextStep() {
     if (state.steps.isEmpty) return;
-    
+
     final nextIndex = (state.currentStepIndex + 1) % state.steps.length;
-    
+
     state = state.copyWith(
       currentStepIndex: nextIndex,
       timeRemaining: state.dwellTimeSec,
     );
-    
+
     _tuneToCurrentStep();
   }
 
   /// Move to previous step manually
   void previousStep() {
     if (state.steps.isEmpty) return;
-    
-    final prevIndex = state.currentStepIndex == 0 
-        ? state.steps.length - 1 
+
+    final prevIndex = state.currentStepIndex == 0
+        ? state.steps.length - 1
         : state.currentStepIndex - 1;
-    
+
     state = state.copyWith(
       currentStepIndex: prevIndex,
       timeRemaining: state.dwellTimeSec,
     );
-    
+
     _tuneToCurrentStep();
   }
 
   /// Jump to a specific step
   void goToStep(int stepIndex) {
     if (stepIndex < 0 || stepIndex >= state.steps.length) return;
-    
+
     state = state.copyWith(
       currentStepIndex: stepIndex,
       timeRemaining: state.dwellTimeSec,
     );
-    
+
     _tuneToCurrentStep();
   }
 
   void _startDwellTimer() {
     _dwellTimer?.cancel();
     _countdownTimer?.cancel();
-    
+
     // Main dwell timer - fires when it's time to move to next step
     _dwellTimer = Timer.periodic(
       Duration(milliseconds: (state.dwellTimeSec * 1000).round()),
       (_) => nextStep(),
     );
-    
+
     // Countdown timer - updates every 100ms for smooth countdown display
     _countdownTimer = Timer.periodic(
       const Duration(milliseconds: 100),
@@ -258,18 +258,18 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
   void _tuneToCurrentStep() {
     final step = state.currentStep;
     if (step == null) return;
-    
+
     // Update SDR config
     _ref.read(sdrConfigProvider.notifier).setFrequency(step.centerMHz);
     _ref.read(sdrConfigProvider.notifier).setBandwidth(step.bandwidthMHz);
-    
+
     // Update waterfall
     _ref.read(waterfallProvider.notifier).setCenterFrequency(step.centerMHz);
     _ref.read(waterfallProvider.notifier).setBandwidth(step.bandwidthMHz);
-    
+
     // Update RX1 status
     _ref.read(multiRxProvider.notifier).setRxScanning(1, step.centerMHz, step.bandwidthMHz);
-    
+
     debugPrint('[Scanner] Tuned to $step');
   }
 

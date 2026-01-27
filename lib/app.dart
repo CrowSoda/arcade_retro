@@ -44,7 +44,7 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
   Future<void> _initializeBackend() async {
     // Small delay to let the widget tree settle
     await Future.delayed(const Duration(milliseconds: 100));
-    
+
     // Start the backend server
     final launcher = ref.read(backendLauncherProvider.notifier);
     await launcher.startBackend();
@@ -54,7 +54,7 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
   Future<void> _loadSavedSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Load FFT size preference (default 65536 if not set)
       final savedFftSize = prefs.getInt('waterfall_fft_size');
       if (savedFftSize != null) {
@@ -65,14 +65,14 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
           debugPrint('[App] Loaded saved FFT size: $savedFftSize');
         }
       }
-      
+
       // Load score threshold preference (default 0.5 if not set)
       final savedThreshold = prefs.getDouble('score_threshold');
       if (savedThreshold != null) {
         ref.read(scoreThresholdProvider.notifier).state = savedThreshold;
         debugPrint('[App] Loaded saved score threshold: $savedThreshold');
       }
-      
+
     } catch (e) {
       debugPrint('[App] Failed to load saved settings: $e');
     }
@@ -92,7 +92,7 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
       routerConfig: router,
       builder: (context, child) {
         Widget content = child ?? const SizedBox();
-        
+
         // Show backend status banner if not running
         if (backendState.state == BackendState.error) {
           content = Column(
@@ -116,7 +116,7 @@ class _G20AppState extends ConsumerState<G20App> with WidgetsBindingObserver {
             ],
           );
         }
-        
+
         // Enforce 16:9 aspect ratio with black letterboxing
         return Container(
           color: Colors.black,  // Letterbox color

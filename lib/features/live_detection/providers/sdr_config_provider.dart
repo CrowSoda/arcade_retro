@@ -14,28 +14,28 @@ import '../../../core/utils/dtg_formatter.dart';
 class SDRConfig {
   /// Center frequency in MHz (30 MHz - 6 GHz)
   final double centerFreqMHz;
-  
+
   /// Instantaneous bandwidth in MHz (0.1 - 50 MHz)
   final double bandwidthMHz;
-  
+
   /// Currently loaded config file path
   final String? configFilePath;
-  
+
   /// Config file name for display
   final String? configFileName;
-  
+
   /// RX Gain in dB (0-34 dB in 0.5 dB steps)
   final double gainDb;
-  
+
   /// Sample rate in Msps (up to 61.44)
   final double sampleRateMsps;
-  
+
   /// Connection status
   final SDRConnectionStatus connectionStatus;
-  
+
   /// Temperature in Celsius
   final double? temperatureC;
-  
+
   /// Last error message
   final String? errorMessage;
 
@@ -111,11 +111,11 @@ class SDRConfig {
   /// Common FFT-friendly bandwidths: 1, 2, 4, 5, 8, 10, 16, 20, 32, 40, 50 MHz
   static double snapToNyquist(double bwMHz) {
     const nyquistFriendly = [0.5, 1.0, 2.0, 4.0, 5.0, 8.0, 10.0, 16.0, 20.0, 32.0, 40.0, 50.0];
-    
+
     // Find closest Nyquist-friendly value
     double closest = nyquistFriendly[0];
     double minDiff = (bwMHz - closest).abs();
-    
+
     for (final nq in nyquistFriendly) {
       final diff = (bwMHz - nq).abs();
       if (diff < minDiff) {
@@ -123,7 +123,7 @@ class SDRConfig {
         closest = nq;
       }
     }
-    
+
     return closest;
   }
 
@@ -210,7 +210,7 @@ class ManualCaptureState {
   final double? pendingBoxY2;
   final String? pendingFreqMHz;   // Freq for pending capture
   final int pendingDuration;      // Duration for pending capture
-  
+
   // Sub-band extraction parameters (set from duration dialog)
   final double? pendingCenterOffsetHz;  // Frequency offset from DC
   final double? pendingBandwidthHz;     // Target bandwidth for extraction
@@ -292,15 +292,15 @@ class ManualCaptureState {
   }
 
   /// Has valid pending box (for drawing overlay)
-  bool get hasPendingBox => pendingBoxX1 != null && pendingBoxY1 != null && 
+  bool get hasPendingBox => pendingBoxX1 != null && pendingBoxY1 != null &&
                             pendingBoxX2 != null && pendingBoxY2 != null;
 
   /// Get the bounding box in frequency/time terms (for current capture)
   bool get hasValidBox => boxX1 != null && boxY1 != null && boxX2 != null && boxY2 != null;
-  
+
   /// Check if currently capturing
   bool get isCapturing => phase == CapturePhase.capturing;
-  
+
   /// Get queue length
   int get queueLength => queue.length;
 }
@@ -405,9 +405,9 @@ class SDRConfigNotifier extends StateNotifier<SDRConfig> {
 /// Drawing is SEPARATE from capturing - can draw while a capture is running
 class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
   final Ref _ref;
-  
+
   ManualCaptureNotifier(this._ref) : super(const ManualCaptureState());
-  
+
   /// Get WebSocket port from backend launcher
   int _getWsPort() {
     final backendState = _ref.read(backendLauncherProvider);
@@ -420,7 +420,7 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
     state = state.copyWith(queue: newQueue);
     debugPrint('📡 Queued capture #${newQueue.length}: ${request.signalName}');
   }
-  
+
   /// Process the next item in the queue (called after a capture completes)
   void _processNextInQueue() {
     if (state.queue.isEmpty) {
@@ -428,12 +428,12 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       state = const ManualCaptureState();
       return;
     }
-    
+
     final next = state.queue.first;
     final remainingQueue = state.queue.sublist(1);
-    
+
     debugPrint('📡 Starting queued capture: ${next.signalName} (${remainingQueue.length} remaining)');
-    
+
     // Start the next capture directly
     state = ManualCaptureState(
       phase: CapturePhase.capturing,
@@ -447,7 +447,7 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       captureProgress: 0.0,
       queue: remainingQueue,
     );
-    
+
     _simulateCapture();
   }
 
@@ -515,7 +515,7 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
   void setPendingDuration(int minutes) {
     state = state.copyWith(pendingDuration: minutes);
   }
-  
+
   /// Set extraction parameters (called from duration dialog)
   void setExtractionParams({
     required double centerOffsetHz,
@@ -544,10 +544,10 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       debugPrint('No pending box to confirm');
       return;
     }
-    
+
     final freqMHz = state.pendingFreqMHz ?? '825.0';
     final signalName = _generateSignalName();  // Just "MAN" - filename includes DTG and freq
-    
+
     if (state.isCapturing) {
       // QUEUE - current capture continues uninterrupted
       _addToQueue(CaptureRequest(
@@ -559,7 +559,7 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
         boxX2: state.pendingBoxX2,
         boxY2: state.pendingBoxY2,
       ));
-      
+
       // Clear drawing state completely - use explicit nulls in new state
       state = ManualCaptureState(
         phase: state.phase,
@@ -659,22 +659,22 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
   void _simulateCapture() async {
     final totalSeconds = state.captureDurationMinutes * 60;
     final startTime = DateTime.now();
-    
+
     // Capture parameters
     final signalName = state.signalName ?? 'UNKNOWN';
     final centerFreqMHz = double.tryParse(state.targetFreqMHz ?? '825.0') ?? 825.0;
-    
+
     // Source parameters (full 20 MHz capture)
     const sourceSampleRate = 20e6;  // 20 MHz sample rate
     const sourceBandwidth = 20e6;   // Full bandwidth
-    
+
     // Check if subband extraction is requested
-    final extractSubband = state.pendingExtractSubband && 
+    final extractSubband = state.pendingExtractSubband &&
                            state.pendingBandwidthHz != null &&
                            state.pendingBandwidthHz! < sourceBandwidth;
     final targetBandwidthHz = state.pendingBandwidthHz ?? sourceBandwidth;
     final centerOffsetHz = state.pendingCenterOffsetHz ?? 0.0;
-    
+
     // DEBUG: Log why extraction might be skipped
     if (!extractSubband) {
       debugPrint('[Capture] ⚠️ SUBBAND EXTRACTION DISABLED because:');
@@ -688,22 +688,22 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       }
       debugPrint('[Capture] Will save FULL 20MHz raw capture');
     }
-    
+
     // Calculate target center frequency for extracted subband
     final targetCenterHz = centerFreqMHz * 1e6 + centerOffsetHz;
-    
+
     debugPrint('[Capture] Starting capture: ${totalSeconds}s');
     debugPrint('[Capture] Source: ${sourceSampleRate/1e6} Msps, center=${centerFreqMHz} MHz');
     if (extractSubband) {
       debugPrint('[Capture] SUBBAND: bw=${targetBandwidthHz/1e6} MHz, offset=${centerOffsetHz/1e6} MHz, target_center=${targetCenterHz/1e6} MHz');
     }
-    
+
     // Chunk size: 0.1 sec at 20 MHz = 2M samples * 8 bytes = 16 MB
     const samplesPerChunk = 2000000;
     const chunkSizeBytes = samplesPerChunk * 8;
     final totalChunks = totalSeconds * 10;
     final totalExpectedSamples = totalSeconds * 20000000;
-    
+
     // Prepare directories and filenames
     final currentDir = Directory.current.path;
     var capturesDir = Directory('$currentDir/data/captures');
@@ -713,13 +713,13 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
         await capturesDir.create(recursive: true);
       }
     }
-    
+
     // File paths
     final finalFilename = RfcapService.generateFilename(signalName, null, targetCenterHz / 1e6);
     final tempFilename = '_temp_${DateTime.now().millisecondsSinceEpoch}.rfcap';
     final tempFilepath = '${capturesDir.path}/$tempFilename';
     final finalFilepath = '${capturesDir.path}/$finalFilename';
-    
+
     // Open source file for reading
     final sourceFile = await _openSourceIqFile();
     if (sourceFile == null) {
@@ -727,11 +727,11 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       state = state.copyWith(phase: CapturePhase.error);
       return;
     }
-    
+
     // Open temp file for streaming writes (always write raw 20 MHz first)
     final outputFile = await File(tempFilepath).open(mode: FileMode.write);
     var samplesWritten = 0;
-    
+
     // CRITICAL FIX: Calculate source offset from the box TIME coordinate
     // The box X coordinate (0-1) represents position in the VISIBLE time window
     // For now, we use a time offset based on the current time modulo file duration
@@ -739,20 +739,20 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
     final sourceFileSize = await sourceFile.length();
     final totalSourceSamples = (sourceFileSize / 8).floor();  // 8 bytes per complex sample
     final totalSourceSeconds = totalSourceSamples / sourceSampleRate;
-    
+
     // Use current timestamp to pick a pseudo-random start point in the source file
     // This prevents always reading the same stale data
     final randomStartSec = (DateTime.now().millisecondsSinceEpoch / 1000) % (totalSourceSeconds - totalSeconds - 1);
     var sourceOffset = (randomStartSec * sourceSampleRate * 8).toInt();
-    
+
     // Align to 8-byte boundary (complex sample size)
     sourceOffset = (sourceOffset ~/ 8) * 8;
-    
+
     debugPrint('[Capture] Source file: ${totalSourceSeconds.toStringAsFixed(1)}s total');
     debugPrint('[Capture] Starting at: ${(sourceOffset / 8 / sourceSampleRate).toStringAsFixed(1)}s into source');
-    
+
     debugPrint('[Capture] Writing raw capture to TEMP: $tempFilepath');
-    
+
     try {
       // STEP 1: Write raw 20 MHz RFCAP header
       final header = RfcapService.createHeader(
@@ -766,64 +766,64 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
         startTime: startTime,
       );
       await outputFile.writeFrom(header);
-      
+
       // STEP 2: Stream raw IQ data
       // OPTIMIZATION: Cache source file size - don't call length() every chunk!
       final sourceFileSizeForLoop = sourceFileSize;  // Already calculated above
-      
+
       for (int chunk = 0; chunk < totalChunks && state.phase == CapturePhase.capturing; chunk++) {
         await sourceFile.setPosition(sourceOffset);
         final chunkData = await sourceFile.read(chunkSizeBytes);
         sourceOffset += chunkSizeBytes;
-        
+
         // Wrap around if we exceed source file
         if (sourceOffset >= sourceFileSizeForLoop) {
           sourceOffset = 0;
         }
-        
+
         await outputFile.writeFrom(chunkData);
         samplesWritten += chunkData.length ~/ 8;
-        
+
         final progress = (chunk + 1) / totalChunks;
         state = state.copyWith(captureProgress: extractSubband ? progress * 0.8 : progress);  // Reserve 20% for extraction
-        
+
         // Reduce delay from 100ms to 10ms for faster capture (still allows UI updates)
         await Future.delayed(const Duration(milliseconds: 10));
-        
+
         if (chunk % 100 == 0) {  // Log less frequently
           debugPrint('[Capture] Progress: ${(progress * 100).toInt()}% ($samplesWritten samples)');
         }
       }
-      
+
       // STEP 3: Update header with actual sample count
       await outputFile.setPosition(32);
       final sampleCountBytes = ByteData(8);
       sampleCountBytes.setUint64(0, samplesWritten, Endian.little);
       await outputFile.writeFrom(sampleCountBytes.buffer.asUint8List());
-      
+
       await sourceFile.close();
       await outputFile.close();
-      
+
       if (state.phase != CapturePhase.capturing) {
         debugPrint('[Capture] Cancelled');
         await File(tempFilepath).delete().catchError((_) {});
         return;
       }
-      
+
       // STEP 4: If subband extraction requested, call Python backend
       if (extractSubband) {
         debugPrint('[Capture] Raw capture complete. Calling Python for subband extraction...');
         state = state.copyWith(captureProgress: 0.85);
-        
+
         final extracted = await _callSubbandExtraction(
-          tempFilepath, 
+          tempFilepath,
           finalFilepath,
           centerFreqMHz * 1e6,  // original center
           sourceSampleRate,     // original sample rate
           targetCenterHz,       // new center
           targetBandwidthHz,    // new bandwidth
         );
-        
+
         if (extracted) {
           // Delete temp file
           await File(tempFilepath).delete().catchError((_) {});
@@ -838,9 +838,9 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
         await File(tempFilepath).rename(finalFilepath);
         debugPrint('[Capture] Raw capture saved: $finalFilepath');
       }
-      
+
       state = state.copyWith(phase: CapturePhase.complete, captureProgress: 1.0);
-      
+
       // Process next in queue
       await Future.delayed(const Duration(milliseconds: 500));
       if (state.queue.isNotEmpty) {
@@ -848,21 +848,21 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       } else {
         state = const ManualCaptureState();
       }
-      
+
     } catch (e) {
       debugPrint('[Capture] ERROR: $e');
       await sourceFile.close();
       await outputFile.close();
       await File(tempFilepath).delete().catchError((_) {});
       state = state.copyWith(phase: CapturePhase.error);
-      
+
       await Future.delayed(const Duration(milliseconds: 500));
       if (state.queue.isNotEmpty) {
         _processNextInQueue();
       }
     }
   }
-  
+
   /// Call Python backend to extract subband (shift → filter → decimate)
   /// Returns true on success, false on failure
   Future<bool> _callSubbandExtraction(
@@ -877,10 +877,10 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       // Connect to training WebSocket (which has extract_subband handler)
       final wsPort = _getWsPort();
       final wsUrl = 'ws://127.0.0.1:$wsPort/training';
-      
+
       debugPrint('[Extract] Connecting to $wsUrl');
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      
+
       // Send extract_subband command
       final command = jsonEncode({
         'command': 'extract_subband',
@@ -889,17 +889,17 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
         'center_offset_hz': newCenterHz - originalCenterHz,  // Offset from original center
         'bandwidth_hz': newBandwidthHz,
       });
-      
+
       debugPrint('[Extract] Sending: $command');
       channel.sink.add(command);
-      
+
       // Wait for response with timeout
       // NOTE: Extraction of 60s @ 20MHz can take several minutes!
       try {
         await for (final message in channel.stream.timeout(const Duration(seconds: 300))) {
           final data = jsonDecode(message as String);
           final type = data['type'];
-          
+
           if (type == 'subband_extracted') {
             debugPrint('[Extract] Success: ${data['output_file']}');
             debugPrint('[Extract] Output rate: ${data['output_rate_hz']/1e6} Msps, BW: ${data['bandwidth_hz']/1e6} MHz');
@@ -919,7 +919,7 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
         await channel.sink.close();
         return false;
       }
-      
+
       await channel.sink.close();
       return false;
     } catch (e) {
@@ -934,17 +934,17 @@ class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
       final currentDir = Directory.current.path;
       var iqPath = '$currentDir/data/825MHz.sigmf-data';
       var file = File(iqPath);
-      
+
       if (!await file.exists()) {
         iqPath = '$currentDir/g20_demo/data/825MHz.sigmf-data';
         file = File(iqPath);
       }
-      
+
       if (!await file.exists()) {
         debugPrint('[Capture] Source IQ file not found');
         return null;
       }
-      
+
       return await file.open(mode: FileMode.read);
     } catch (e) {
       debugPrint('[Capture] Error opening source: $e');

@@ -1,5 +1,5 @@
 /// Display Mode Header - Toggle between Spectrum and Map views
-/// 
+///
 /// Shows current view mode with toggle button for switching
 library;
 
@@ -29,16 +29,16 @@ class DisplayModeHeader extends ConsumerWidget {
         children: [
           // Title based on mode
           Icon(
-            displayMode == DisplayMode.waterfall 
-                ? Icons.waves 
+            displayMode == DisplayMode.waterfall
+                ? Icons.waves
                 : Icons.map,
             color: G20Colors.primary,
             size: 20,
           ),
           const SizedBox(width: 8),
           Text(
-            displayMode == DisplayMode.waterfall 
-                ? 'Spectrum View' 
+            displayMode == DisplayMode.waterfall
+                ? 'Spectrum View'
                 : 'Detection Map',
             style: const TextStyle(
               fontSize: 14,

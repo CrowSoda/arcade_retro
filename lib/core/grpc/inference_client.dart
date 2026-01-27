@@ -1,7 +1,7 @@
 // lib/core/grpc/inference_client.dart
 /// Unified WebSocket client - receives BOTH waterfall and detections
 /// Connects to Python unified pipeline at /ws/unified
-/// 
+///
 /// OPTIMIZED: Binary protocol for waterfall (pre-rendered RGBA from Python)
 
 import 'dart:async';
@@ -106,17 +106,17 @@ class WaterfallRow {
   /// - Remaining: Float32 dB values for PSD (width * 4 bytes)
   factory WaterfallRow.fromBinary(Uint8List data) {
     final byteData = ByteData.sublistView(data);
-    
+
     // Skip message type (byte 0) and padding (bytes 1-3)
     final sequenceId = byteData.getUint32(4, Endian.little);
     final pts = byteData.getFloat64(8, Endian.little);
     final width = byteData.getUint32(16, Endian.little);
-    
+
     // Extract RGBA pixels (already pre-rendered by Python!)
     const pixelStart = 20;  // Header is 20 bytes
     final pixelLength = width * 4;
     final rgbaPixels = Uint8List.sublistView(data, pixelStart, pixelStart + pixelLength);
-    
+
     // Extract dB values for PSD chart (starts at 4-byte aligned offset)
     final psdStart = pixelStart + pixelLength;
     final psdLength = width;  // Number of Float32 elements (not bytes)
@@ -127,7 +127,7 @@ class WaterfallRow {
     } else {
       psdData = Float32List(width);  // Empty fallback
     }
-    
+
     return WaterfallRow(
       sequenceId: sequenceId,
       pts: pts,
@@ -155,21 +155,21 @@ class WaterfallRow {
 class UnifiedPipelineManager {
   final String host;
   final int port;
-  
+
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   bool _isConnected = false;
-  
+
   // Streams for waterfall and detections
   final _waterfallController = StreamController<WaterfallRow>.broadcast();
   final _detectionController = StreamController<DetectionFrame>.broadcast();
-  
+
   /// Stream of waterfall rows (pre-rendered RGBA)
   Stream<WaterfallRow> get waterfallRows => _waterfallController.stream;
-  
+
   /// Stream of detection frames
   Stream<DetectionFrame> get detections => _detectionController.stream;
-  
+
   /// Whether connected
   bool get isConnected => _isConnected;
 
@@ -182,9 +182,9 @@ class UnifiedPipelineManager {
     try {
       final wsUrl = 'ws://$host:$port/ws/unified';
       debugPrint('[UnifiedPipeline] Connecting to $wsUrl (BINARY MODE)');
-      
+
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      
+
       // Listen for messages - handle BOTH binary and text
       _subscription = _channel!.stream.listen(
         _handleMessage,
@@ -197,7 +197,7 @@ class UnifiedPipelineManager {
           _isConnected = false;
         },
       );
-      
+
       _isConnected = true;
       debugPrint('[UnifiedPipeline] Connected!');
       return true;
@@ -215,12 +215,12 @@ class UnifiedPipelineManager {
         // Silently ignore binary messages - they're for the video stream
         return;
       }
-      
+
       // TEXT message = JSON (detections, status, errors)
       if (message is String) {
         final json = jsonDecode(message) as Map<String, dynamic>;
         final msgType = json['type'] as String?;
-        
+
         if (msgType == 'waterfall') {
           // Legacy JSON waterfall (shouldn't happen with new backend)
           debugPrint('[UnifiedPipeline] WARNING: Received legacy JSON waterfall');
@@ -273,13 +273,13 @@ class UnifiedPipelineManager {
 class InferenceManager {
   final String host;
   final int port;
-  
+
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   String? _currentSessionId;
-  
+
   final _detectionController = StreamController<DetectionFrame>.broadcast();
-  
+
   Stream<DetectionFrame> get detections => _detectionController.stream;
   String? get sessionId => _currentSessionId;
   bool get isRunning => _currentSessionId != null;
@@ -299,9 +299,9 @@ class InferenceManager {
     try {
       final wsUrl = 'ws://$host:$port/ws/inference';
       debugPrint('[InferenceManager] Connecting to $wsUrl');
-      
+
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      
+
       final startCmd = jsonEncode({
         'command': 'start',
         'model_path': modelPath ?? '',
@@ -311,15 +311,15 @@ class InferenceManager {
         'chunk_ms': chunkMs,
         'dyn_range_db': dynRangeDb,
       });
-      
+
       _channel!.sink.add(startCmd);
-      
+
       _subscription = _channel!.stream.listen(
         (message) {
           try {
             final json = jsonDecode(message as String) as Map<String, dynamic>;
             final msgType = json['type'] as String?;
-            
+
             if (msgType == 'session_started') {
               _currentSessionId = json['session_id'] as String?;
               debugPrint('[InferenceManager] Session started: $_currentSessionId');
@@ -342,10 +342,10 @@ class InferenceManager {
           _currentSessionId = null;
         },
       );
-      
+
       await Future.delayed(const Duration(milliseconds: 500));
       _currentSessionId = 'pending';
-      
+
       final runCmd = jsonEncode({
         'command': 'run',
         'center_freq_mhz': 825.0,
@@ -353,7 +353,7 @@ class InferenceManager {
         'sample_rate': 20e6,
         'chunk_ms': chunkMs,
       });
-      
+
       _channel!.sink.add(runCmd);
       return true;
     } catch (e) {

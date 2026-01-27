@@ -41,10 +41,10 @@ class _FadingToastState extends State<_FadingToast> with SingleTickerProviderSta
     super.initState();
     _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
-    
+
     // Fade in
     _controller.forward();
-    
+
     // Wait then fade out
     Future.delayed(widget.duration - const Duration(milliseconds: 300), () {
       if (mounted) {
@@ -88,14 +88,14 @@ void showFadingToast(BuildContext context, String message, {IconData icon = Icon
   final overlay = Overlay.of(context);
   late OverlayEntry entry;
   bool isRemoved = false;
-  
+
   void safeRemove() {
     if (!isRemoved) {
       isRemoved = true;
       entry.remove();
     }
   }
-  
+
   entry = OverlayEntry(
     builder: (context) => Positioned(
       top: MediaQuery.of(context).size.height * 0.15,
@@ -114,9 +114,9 @@ void showFadingToast(BuildContext context, String message, {IconData icon = Icon
       ),
     ),
   );
-  
+
   overlay.insert(entry);
-  
+
   // Safety fallback: ensure removal after max duration even if animation fails
   Future.delayed(const Duration(seconds: 5), safeRemove);
 }
@@ -131,7 +131,7 @@ Future<bool> showCaptureWarningDialog(BuildContext context, ManualCaptureState c
         children: [
           Icon(Icons.warning_amber, color: G20Colors.warning, size: 24),
           SizedBox(width: 8),
-          Text('Capture in Progress', 
+          Text('Capture in Progress',
             style: TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16)),
         ],
       ),
@@ -202,13 +202,13 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
   /// Start/restart auto-tune debounce timer
   void _onFrequencyChanged(String value) {
     _autoTuneTimer?.cancel();
-    
+
     final autoTuneDelay = ref.read(autoTuneDelayProvider);
     if (autoTuneDelay == null) return;  // Auto-tune disabled
-    
+
     final freq = double.tryParse(value);
     if (!_isValidFrequency(freq)) return;  // Invalid frequency, don't auto-tune
-    
+
     _autoTuneTimer = Timer(Duration(seconds: autoTuneDelay), () {
       if (mounted) _handleGo();
     });
@@ -216,7 +216,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
 
   void _handleGo() async {
     _autoTuneTimer?.cancel();  // Cancel any pending auto-tune
-    
+
     final centerMHz = double.tryParse(_freqController.text);
     final bwMHz = ref.read(sdrConfigProvider).bandwidthMHz;
 
@@ -230,7 +230,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
             children: [
               Icon(Icons.warning_amber, color: G20Colors.error, size: 24),
               SizedBox(width: 8),
-              Text('Invalid Frequency', 
+              Text('Invalid Frequency',
                 style: TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16)),
             ],
           ),
@@ -239,7 +239,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                centerMHz == null 
+                centerMHz == null
                   ? 'Please enter a valid frequency'
                   : 'Frequency ${centerMHz.toStringAsFixed(1)} MHz is outside NV100 range.',
                 style: const TextStyle(color: G20Colors.textSecondaryDark),
@@ -280,7 +280,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
     // Update both providers
     ref.read(sdrConfigProvider.notifier).setFrequency(centerMHz!);
     ref.read(waterfallProvider.notifier).setCenterFrequency(centerMHz);
-    
+
     // Update RX-2 in command bar
     ref.read(multiRxProvider.notifier).tuneRx2(centerMHz, bwMHz, null);
 
@@ -340,7 +340,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
             ],
           ),
           const SizedBox(height: 4),
-          
+
           // Active config - more compact
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -364,9 +364,9 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
               ],
             ),
           ),
-          
+
           const SizedBox(height: 6),
-          
+
           // Frequency + BW - compact
           Row(
             children: [
@@ -375,9 +375,9 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
               Expanded(child: _BandwidthDropdown(value: sdrConfig.bandwidthMHz, onChanged: (bw) { ref.read(sdrConfigProvider.notifier).setBandwidth(bw); ref.read(waterfallProvider.notifier).setBandwidth(bw); })),
             ],
           ),
-          
+
           const SizedBox(height: 6),
-          
+
           // Timeout row - compact
           Row(
             children: [
@@ -392,9 +392,9 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
               _TimeoutButton(label: '∞', isSelected: _selectedTimeout == null && isManual, onTap: () => _handleTimeoutSelect(null)),
             ],
           ),
-          
+
           const SizedBox(height: 6),
-          
+
           // GO button - smaller
           SizedBox(
             height: 32,
@@ -406,7 +406,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                   : const Text('GO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             ),
           ),
-          
+
           // Resume Auto - compact
           if (isManual) ...[
             const SizedBox(height: 4),
@@ -420,13 +420,13 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
               ),
             ),
           ],
-          
+
           // Error
           if (sdrConfig.errorMessage != null || tuningState.errorMessage != null) ...[
             const SizedBox(height: 4),
             Text(sdrConfig.errorMessage ?? tuningState.errorMessage ?? '', style: const TextStyle(fontSize: 8, color: G20Colors.error)),
           ],
-          
+
           // Dynamic Range slider - use Expanded to fill remaining space
           const SizedBox(height: 6),
           const Divider(color: G20Colors.cardDark, height: 1),
@@ -445,7 +445,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
       if (!proceed) return;
       ref.read(manualCaptureProvider.notifier).cancel();
     }
-    
+
     // Show mission picker popup
     final missions = ref.read(missionsProvider);
     _showMissionPickerPopup(context, ref, missions);
@@ -486,7 +486,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                   ],
                 ),
               ),
-              
+
               // Mission list
               Flexible(
                 child: missions.isEmpty
@@ -519,7 +519,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                                 onTap: () {
                                   // Set mission as active
                                   ref.read(activeMissionProvider.notifier).state = mission;
-                                  
+
                                   // HYDRA: Load detection heads for this mission
                                   final signals = mission.models.map((m) => m.id).toList();
                                   if (signals.isNotEmpty) {
@@ -528,32 +528,32 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                                   } else {
                                     debugPrint('[Mission] No models in mission - no heads to load');
                                   }
-                                  
+
                                   // Load mission into scanner and start stepped scanning
                                   final scanner = ref.read(scannerProvider.notifier);
                                   scanner.loadMission(mission);
                                   scanner.startScanning();
-                                  
+
                                   // Get the first step's center frequency for display
                                   final firstStep = ref.read(scannerProvider).currentStep;
-                                  final centerFreq = firstStep?.centerMHz ?? 
-                                      (mission.freqRanges.isNotEmpty 
+                                  final centerFreq = firstStep?.centerMHz ??
+                                      (mission.freqRanges.isNotEmpty
                                           ? mission.freqRanges.first.startMhz + mission.bandwidthMhz / 2
                                           : ref.read(sdrConfigProvider).centerFreqMHz);
-                                  
+
                                   Navigator.pop(ctx);
-                                  
+
                                   // Show fading toast with step count and head count
                                   final stepCount = ref.read(scannerProvider).totalSteps;
                                   showFadingToast(
-                                    context, 
-                                    'Mission "${mission.name}" - $stepCount steps, ${signals.length} detectors', 
-                                    icon: Icons.rocket_launch, 
+                                    context,
+                                    'Mission "${mission.name}" - $stepCount steps, ${signals.length} detectors',
+                                    icon: Icons.rocket_launch,
                                     color: Colors.green.shade700,
                                   );
-                                  
+
                                   debugPrint('[Mission] Loaded: ${mission.name} with $stepCount steps, ${signals.length} heads');
-                                  
+
                                   // Update freq text field
                                   setState(() {
                                     _freqController.text = centerFreq.toStringAsFixed(1);
@@ -600,7 +600,7 @@ class _InputsPanelState extends ConsumerState<InputsPanel> {
                         },
                       ),
               ),
-              
+
               // Footer
               Container(
                 padding: const EdgeInsets.all(12),
@@ -788,7 +788,7 @@ class _DbRangeSliders extends ConsumerWidget {
 
   void _setDynamicRange(WidgetRef ref, double range) {
     ref.read(waterfallDynamicRangeProvider.notifier).state = range;
-    
+
     // Send only dynamic range to backend (backend keeps its own noise floor tracking)
     // We send as min/max but backend extracts just the range
     ref.read(videoStreamProvider.notifier).setDbRange(-100, -100 + range);
@@ -797,7 +797,7 @@ class _DbRangeSliders extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dynamicRange = ref.watch(waterfallDynamicRangeProvider);
-    
+
     // Use LayoutBuilder to handle small heights gracefully
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -807,7 +807,7 @@ class _DbRangeSliders extends ConsumerWidget {
             children: [
               const Icon(Icons.tune, size: 12, color: G20Colors.textSecondaryDark),
               const SizedBox(width: 4),
-              Text('${dynamicRange.toStringAsFixed(0)} dB', 
+              Text('${dynamicRange.toStringAsFixed(0)} dB',
                 style: const TextStyle(fontSize: 10, color: G20Colors.primary)),
               Expanded(
                 child: Slider(
@@ -819,7 +819,7 @@ class _DbRangeSliders extends ConsumerWidget {
             ],
           );
         }
-        
+
         // Full version
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,7 +849,7 @@ class _DbRangeSliders extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 4),
-            
+
             // Simple slider
             SliderTheme(
               data: SliderThemeData(
@@ -869,7 +869,7 @@ class _DbRangeSliders extends ConsumerWidget {
                 onChanged: (v) => _setDynamicRange(ref, v),
               ),
             ),
-            
+
             // Min/Max labels
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),

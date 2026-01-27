@@ -1,5 +1,5 @@
 /// Mission Picker Dialog - Shared widget for selecting missions
-/// 
+///
 /// Used in both LiveDetectionScreen and InputsPanel to avoid duplication
 library;
 
@@ -9,15 +9,15 @@ import '../../../core/config/theme.dart';
 import '../config_screen.dart' show Mission, missionsProvider, activeMissionProvider;
 
 /// Show the mission picker dialog
-/// 
+///
 /// Returns the selected mission or null if cancelled/cleared
 Future<Mission?> showMissionPickerDialog(
-  BuildContext context, 
+  BuildContext context,
   WidgetRef ref, {
   VoidCallback? onMissionLoaded,
 }) async {
   final missions = ref.read(missionsProvider);
-  
+
   return showDialog<Mission?>(
     context: context,
     builder: (ctx) => _MissionPickerDialog(
@@ -109,7 +109,7 @@ class _MissionPickerDialog extends StatelessWidget {
                 ],
               ),
             ),
-            
+
             // Mission list
             Flexible(
               child: missions.isEmpty
@@ -122,13 +122,13 @@ class _MissionPickerDialog extends StatelessWidget {
                       itemBuilder: (context, index) {
                         final mission = missions[index];
                         return MissionCard(
-                          mission: mission, 
+                          mission: mission,
                           onTap: () => onSelect(mission),
                         );
                       },
                     ),
             ),
-            
+
             // Footer
             Container(
               padding: const EdgeInsets.all(16),
@@ -193,7 +193,7 @@ class MissionCard extends StatelessWidget {
 
   const MissionCard({
     super.key,
-    required this.mission, 
+    required this.mission,
     required this.onTap,
   });
 

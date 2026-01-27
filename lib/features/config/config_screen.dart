@@ -1,6 +1,6 @@
 // lib/features/config/config_screen.dart
 /// Config screen - Create, edit, and manage missions
-/// 
+///
 /// A Mission defines:
 /// - Frequency ranges to scan (e.g., 80-120 MHz, 1000-1200 MHz)
 /// - RX Bandwidth
@@ -28,7 +28,7 @@ class FreqRange {
   const FreqRange({required this.startMhz, required this.endMhz});
 
   String get label => '${startMhz.toInt()}-${endMhz.toInt()} MHz';
-  
+
   FreqRange copyWith({double? startMhz, double? endMhz}) => FreqRange(
     startMhz: startMhz ?? this.startMhz,
     endMhz: endMhz ?? this.endMhz,
@@ -110,10 +110,10 @@ class Mission {
 // ============================================================================
 
 /// Available Hydra heads - READ FROM REGISTRY.JSON
-/// 
+///
 /// registry.json is THE source of truth maintained by the backend.
 /// Contains all signals with validated metrics (F1, sample_count, version, etc.)
-/// 
+///
 /// Structure:
 /// {
 ///   "backbone_version": 1,
@@ -133,23 +133,23 @@ final availableModelsProvider = FutureProvider<List<ModelPriority>>((ref) async 
     debugPrint('[Models] No registry.json found - run backend to generate');
     return [];
   }
-  
+
   try {
     final registryJson = await registryFile.readAsString();
     final registry = json.decode(registryJson) as Map<String, dynamic>;
     final signals = registry['signals'] as Map<String, dynamic>? ?? {};
-    
+
     final models = <ModelPriority>[];
-    
+
     for (final entry in signals.entries) {
       final signalName = entry.key;
       final data = entry.value as Map<String, dynamic>;
-      
+
       // Build metrics display string
       final f1Score = (data['f1_score'] as num?)?.toDouble() ?? 0.0;
       final sampleCount = data['sample_count'] as int? ?? 0;
       final version = data['active_head_version'] as int? ?? 1;
-      
+
       String? metricsInfo;
       if (f1Score > 0) {
         metricsInfo = 'v$version • F1: ${(f1Score * 100).toInt()}% • $sampleCount samples';
@@ -158,9 +158,9 @@ final availableModelsProvider = FutureProvider<List<ModelPriority>>((ref) async 
       } else {
         metricsInfo = 'v$version';
       }
-      
+
       final headPath = data['head_path'] as String? ?? 'heads/$signalName/active.pth';
-      
+
       models.add(ModelPriority(
         id: signalName,
         name: signalName,
@@ -169,11 +169,11 @@ final availableModelsProvider = FutureProvider<List<ModelPriority>>((ref) async 
         priority: 0,
       ));
     }
-    
+
     models.sort((a, b) => a.name.compareTo(b.name));
     debugPrint('[Models] Loaded ${models.length} heads from registry: ${models.map((m) => m.name).join(', ')}');
     return models;
-    
+
   } catch (e) {
     debugPrint('[Models] Error reading registry.json: $e');
     return [];
@@ -188,8 +188,16 @@ final missionsProvider = StateNotifierProvider<MissionsNotifier, List<Mission>>(
 
 class MissionsNotifier extends StateNotifier<List<Mission>> {
   static const _filePath = 'config/missions.json';
-  
-  MissionsNotifier() : super(_loadFromDiskSync());  // Load synchronously at startup
+  bool _isLoaded = false;
+
+  /// Creates notifier and starts async load from disk.
+  /// Uses async pattern to avoid blocking UI thread.
+  MissionsNotifier() : super([]) {
+    _loadFromDisk();  // Fire async load, state updates when complete
+  }
+
+  /// Get loading status
+  bool get isLoaded => _isLoaded;
 
   void addMission(Mission mission) {
     state = [...state, mission];
@@ -205,24 +213,25 @@ class MissionsNotifier extends StateNotifier<List<Mission>> {
     state = state.where((m) => m.id != id).toList();
     _saveToDisk();
   }
-  
-  /// Synchronously load from disk at startup so list is ready immediately
-  static List<Mission> _loadFromDiskSync() {
+
+  /// Async load from disk - does not block UI thread
+  Future<void> _loadFromDisk() async {
     try {
       final file = File(_filePath);
-      if (file.existsSync()) {
-        final jsonStr = file.readAsStringSync();
+      if (await file.exists()) {
+        final jsonStr = await file.readAsString();
         final List<dynamic> jsonList = json.decode(jsonStr);
         final missions = jsonList.map((j) => _missionFromJsonStatic(j)).toList();
-        debugPrint('[Missions] Loaded ${missions.length} missions from disk (sync)');
-        return missions;
+        state = missions;
+        debugPrint('[Missions] Loaded ${missions.length} missions from disk (async)');
       }
     } catch (e) {
       debugPrint('[Missions] Error loading from disk: $e');
+      // Keep empty list on error
     }
-    return [];
+    _isLoaded = true;
   }
-  
+
   static Mission _missionFromJsonStatic(Map<String, dynamic> j) => Mission(
     id: j['id'],
     name: j['name'],
@@ -234,7 +243,7 @@ class MissionsNotifier extends StateNotifier<List<Mission>> {
     created: DateTime.parse(j['created']),
     modified: DateTime.parse(j['modified']),
   );
-  
+
   Future<void> _saveToDisk() async {
     try {
       final dir = Directory('config');
@@ -249,7 +258,7 @@ class MissionsNotifier extends StateNotifier<List<Mission>> {
       debugPrint('[Missions] Error saving to disk: $e');
     }
   }
-  
+
   Map<String, dynamic> _missionToJson(Mission m) => {
     'id': m.id,
     'name': m.name,
@@ -261,7 +270,7 @@ class MissionsNotifier extends StateNotifier<List<Mission>> {
     'created': m.created.toIso8601String(),
     'modified': m.modified.toIso8601String(),
   };
-  
+
   Mission _missionFromJson(Map<String, dynamic> j) => Mission(
     id: j['id'],
     name: j['name'],
@@ -328,7 +337,7 @@ class ConfigScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 16),
-            
+
             // RIGHT: Mission editor
             Expanded(
               child: selectedMission == null
@@ -354,7 +363,7 @@ class ConfigScreen extends ConsumerWidget {
 
   void _showNewMissionDialog(BuildContext context, WidgetRef ref) {
     final nameController = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -564,12 +573,12 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
       modified: DateTime.now(),
     );
     widget.onSave(updated);
-    
+
     // Show fading toast for save confirmation
     showFadingToast(context, 'Mission "${updated.name}" saved', icon: Icons.save, color: Colors.green.shade700);
-    
+
     debugPrint('[Mission] Saved: ${updated.name}');
-    
+
     // If this mission is currently ACTIVE, reload heads to pick up changes
     final activeMission = ref.read(activeMissionProvider);
     if (activeMission != null && activeMission.id == updated.id) {
@@ -583,7 +592,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
   void _loadMission() {
     // First save current edits
     _save();
-    
+
     // Build the updated mission
     final updatedMission = widget.mission.copyWith(
       name: _nameController.text.trim(),
@@ -593,10 +602,10 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
       freqRanges: _freqRanges,
       models: _selectedModels,
     );
-    
+
     // Set as active mission
     ref.read(activeMissionProvider.notifier).state = updatedMission;
-    
+
     // Log mission config
     debugPrint('[Config] ════════════════════════════════════════');
     debugPrint('[Config] LOADING MISSION: ${_nameController.text}');
@@ -612,7 +621,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
       debugPrint('[Config]   ${m.priority + 1}. ${m.name}');
     }
     debugPrint('[Config] ════════════════════════════════════════');
-    
+
     // LOAD HEADS VIA BACKEND API
     final signals = _selectedModels.map((m) => m.id).toList();
     if (signals.isNotEmpty) {
@@ -647,7 +656,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
             ],
           ),
           const Divider(),
-          
+
           // Scrollable content
           Expanded(
             child: SingleChildScrollView(
@@ -663,7 +672,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // BW & Dwell DROPDOWNS
                   Row(
                     children: [
@@ -687,11 +696,11 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
                     ],
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // Frequency Ranges TABLE
                   _buildFreqRangesTable(),
                   const SizedBox(height: 24),
-                  
+
                   // Models with Priority (drag-drop)
                   _buildModelsSection(),
                 ],
@@ -760,7 +769,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
                     final idx = e.key;
                     final range = e.value;
                     final isEditing = _editingFreqIndex == idx;
-                    
+
                     return DataRow(
                       selected: isEditing,
                       onSelectChanged: (_) => setState(() => _editingFreqIndex = isEditing ? null : idx),
@@ -887,7 +896,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
                       child: Center(child: Text('${index + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
                     ),
                     title: Text(model.name, style: const TextStyle(color: G20Colors.textPrimaryDark)),
-                    subtitle: model.signalType != null 
+                    subtitle: model.signalType != null
                         ? Text(model.signalType!, style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 10))
                         : null,
                     trailing: Row(
@@ -938,7 +947,7 @@ class _MissionEditorState extends ConsumerState<_MissionEditor> {
               return ListTile(
                 leading: const Icon(Icons.psychology),
                 title: Text(model.name),
-                subtitle: model.signalType != null 
+                subtitle: model.signalType != null
                     ? Text(model.signalType!, style: TextStyle(fontSize: 11, color: G20Colors.textSecondaryDark))
                     : null,
                 onTap: () {

@@ -1,5 +1,5 @@
 /// Settings Providers - Centralized state management for all app settings
-/// 
+///
 /// This file contains all settings-related StateProviders with PERSISTENCE
 /// via SharedPreferences. All settings are saved on change and loaded on startup.
 library;
@@ -33,16 +33,16 @@ T _loadSetting<T>(String key, T defaultValue) {
 class PersistentSettingNotifier<T> extends StateNotifier<T> {
   final String _key;
   final T _defaultValue;
-  
+
   PersistentSettingNotifier(this._key, this._defaultValue) : super(_defaultValue) {
     _loadFromDisk();
   }
-  
+
   Future<void> _loadFromDisk() async {
     try {
       final prefs = await _getPrefs();
       final T? loaded;
-      
+
       if (_defaultValue is int) {
         loaded = prefs.getInt(_key) as T?;
       } else if (_defaultValue is double) {
@@ -54,7 +54,7 @@ class PersistentSettingNotifier<T> extends StateNotifier<T> {
       } else {
         loaded = null;
       }
-      
+
       if (loaded != null) {
         state = loaded;
         debugPrint('[Settings] Loaded $_key = $loaded');
@@ -63,11 +63,11 @@ class PersistentSettingNotifier<T> extends StateNotifier<T> {
       debugPrint('[Settings] Error loading $_key: $e');
     }
   }
-  
+
   Future<void> _saveToDisk(T value) async {
     try {
       final prefs = await _getPrefs();
-      
+
       if (value is int) {
         await prefs.setInt(_key, value);
       } else if (value is double) {
@@ -77,13 +77,13 @@ class PersistentSettingNotifier<T> extends StateNotifier<T> {
       } else if (value is String) {
         await prefs.setString(_key, value);
       }
-      
+
       debugPrint('[Settings] Saved $_key = $value');
     } catch (e) {
       debugPrint('[Settings] Error saving $_key: $e');
     }
   }
-  
+
   void setValue(T value) {
     state = value;
     _saveToDisk(value);
@@ -94,11 +94,11 @@ class PersistentSettingNotifier<T> extends StateNotifier<T> {
 class PersistentNullableIntNotifier extends StateNotifier<int?> {
   final String _key;
   final int? _defaultValue;
-  
+
   PersistentNullableIntNotifier(this._key, this._defaultValue) : super(_defaultValue) {
     _loadFromDisk();
   }
-  
+
   Future<void> _loadFromDisk() async {
     try {
       final prefs = await _getPrefs();
@@ -111,12 +111,12 @@ class PersistentNullableIntNotifier extends StateNotifier<int?> {
       debugPrint('[Settings] Error loading $_key: $e');
     }
   }
-  
+
   void setValue(int? value) {
     state = value;
     _saveToDisk(value);
   }
-  
+
   Future<void> _saveToDisk(int? value) async {
     try {
       final prefs = await _getPrefs();
@@ -140,7 +140,7 @@ final autoTuneDelayProvider = StateNotifierProvider<PersistentNullableIntNotifie
 });
 
 // ============================================================================
-// INFERENCE SETTINGS  
+// INFERENCE SETTINGS
 // ============================================================================
 
 /// Score threshold for detection filtering (0.0 - 1.0)

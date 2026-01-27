@@ -1,5 +1,5 @@
 /// G20 Logger - Production-grade structured logging system
-/// 
+///
 /// Features:
 /// - Structured logging with metadata
 /// - Session/correlation ID tracking
@@ -8,7 +8,7 @@
 /// - Performance metrics collection
 /// - Remote logging support (extensible)
 /// - Ring buffer for recent logs
-/// 
+///
 /// Usage:
 ///   final log = G20Logger.of('VideoStream');
 ///   log.info('Connected', data: {'port': 8765});
@@ -84,28 +84,28 @@ class LogEntry {
   /// Human-readable format
   String toConsole({bool includeTimestamp = false}) {
     final buffer = StringBuffer();
-    
+
     if (includeTimestamp) {
       buffer.write('${timestamp.hour.toString().padLeft(2, '0')}:'
           '${timestamp.minute.toString().padLeft(2, '0')}:'
           '${timestamp.second.toString().padLeft(2, '0')}.'
           '${timestamp.millisecond.toString().padLeft(3, '0')} ');
     }
-    
+
     if (level.value >= LogLevel.warn.value) {
       buffer.write('[${level.label}] ');
     }
-    
+
     buffer.write('[$module] $message');
-    
+
     if (data != null && data!.isNotEmpty) {
       buffer.write(' ${_formatData(data!)}');
     }
-    
+
     if (duration != null) {
       buffer.write(' (${duration!.inMilliseconds}ms)');
     }
-    
+
     return buffer.toString();
   }
 
@@ -134,13 +134,13 @@ class ConsoleLogHandler implements LogHandler {
   @override
   void handle(LogEntry entry) {
     final msg = entry.toConsole(includeTimestamp: showTimestamps);
-    
+
     if (useColors && !kReleaseMode) {
       debugPrint(_colorize(msg, entry.level));
     } else {
       debugPrint(msg);
     }
-    
+
     // Print stack trace for errors
     if (entry.stackTrace != null && entry.level.value >= LogLevel.error.value) {
       debugPrint(entry.stackTrace.toString());
@@ -205,15 +205,15 @@ class LogRingBuffer {
 
   List<LogEntry> getRecent({int count = 50, LogLevel? minLevel, String? module}) {
     var entries = _buffer.toList().reversed;
-    
+
     if (minLevel != null) {
       entries = entries.where((e) => e.level.value >= minLevel.value);
     }
-    
+
     if (module != null) {
       entries = entries.where((e) => e.module == module);
     }
-    
+
     return entries.take(count).toList();
   }
 
@@ -240,7 +240,7 @@ class G20LogManager {
 
   // Output handlers
   final List<LogHandler> _handlers = [ConsoleLogHandler()];
-  
+
   // Ring buffer for recent logs
   final LogRingBuffer _buffer = LogRingBuffer(maxSize: 500);
 
@@ -296,7 +296,7 @@ class G20LogManager {
   }) {
     // Check level filter
     if (level.value < minLevel.value) return;
-    
+
     // Check module filter
     if (enabledModules.isNotEmpty && !enabledModules.contains(module)) return;
 

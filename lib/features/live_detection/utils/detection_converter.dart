@@ -1,5 +1,5 @@
 /// Detection Converter - Converts between different detection formats
-/// 
+///
 /// Handles conversion from VideoStream detections to Detection model
 library;
 
@@ -8,13 +8,13 @@ import '../providers/video_stream_provider.dart' as video_stream;
 import '../../../core/utils/dtg_formatter.dart';
 
 /// Convert VideoStream Detection to DetectionProvider Detection
-/// 
+///
 /// [vd] - The VideoDetection from the video stream
 /// [pts] - The presentation timestamp
 /// [centerFreqMHz] - The SDR center frequency (default 825 MHz)
 /// [bandwidthMHz] - The SDR bandwidth (default 20 MHz)
 Detection convertVideoDetection(
-  video_stream.VideoDetection vd, 
+  video_stream.VideoDetection vd,
   double pts, {
   double centerFreqMHz = 825.0,
   double bandwidthMHz = 20.0,
@@ -23,7 +23,7 @@ Detection convertVideoDetection(
   final freqStart = centerFreqMHz - (bandwidthMHz / 2);
   final freqMHz = freqStart + ((vd.y1 + vd.y2) / 2) * bandwidthMHz;
   final detBandwidthMHz = (vd.y2 - vd.y1) * bandwidthMHz;
-  
+
   return Detection(
     id: 'vid_${vd.detectionId}_${pts.toStringAsFixed(2)}',
     classId: vd.classId,
@@ -53,15 +53,15 @@ List<Detection> convertVideoDetections(
   double bandwidthMHz = 20.0,
 }) {
   return detections.map((vd) => convertVideoDetection(
-    vd, 
-    pts, 
+    vd,
+    pts,
     centerFreqMHz: centerFreqMHz,
     bandwidthMHz: bandwidthMHz,
   )).toList();
 }
 
 /// Helper to create UNK detections with proper naming: unk_[DTG]_[freq]MHz
-/// 
+///
 /// Example output: unk_220001ZJAN26_830.2MHz
 Detection createUnkDetection({
   required String id,
@@ -83,7 +83,7 @@ Detection createUnkDetection({
   final now = timestamp ?? DateTime.now();
   // Generate className as unk_DTG_freqMHz
   final className = generateUnkFilename(now, freqMHz.toStringAsFixed(1));
-  
+
   return Detection(
     id: id,
     classId: 0,

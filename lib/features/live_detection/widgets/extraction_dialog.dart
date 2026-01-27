@@ -30,7 +30,7 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
   @override
   Widget build(BuildContext context) {
     final extractionState = ref.watch(subbandExtractionProvider);
-    
+
     // Calculate extraction parameters from box
     ExtractionRequest? request;
     if (widget.boxX1 != null && widget.boxX2 != null) {
@@ -39,8 +39,8 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
         boxX1: widget.boxX1!,
         boxX2: widget.boxX2!,
         sourceBandwidthHz: widget.sourceBandwidthHz,
-        durationSec: widget.durationMinutes != null 
-            ? widget.durationMinutes! * 60.0 
+        durationSec: widget.durationMinutes != null
+            ? widget.durationMinutes! * 60.0
             : null,
         stopbandDb: stopbandDb,
       );
@@ -75,9 +75,9 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
               value: extractNarrowband,
               onChanged: (v) => setState(() => extractNarrowband = v ?? true),
             ),
-            
+
             const Divider(),
-            
+
             // Extraction parameters
             if (extractNarrowband && request != null) ...[
               _buildInfoRow(
@@ -100,9 +100,9 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
                 'Estimated Output Size',
                 '${estimates['output_size_mb']?.toStringAsFixed(1)} MB',
               ),
-              
+
               const SizedBox(height: 12),
-              
+
               // Stopband slider
               Row(
                 children: [
@@ -120,7 +120,7 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
                   Text('${stopbandDb.toInt()} dB'),
                 ],
               ),
-              
+
               // Quality indicator
               Container(
                 padding: const EdgeInsets.all(8),
@@ -151,7 +151,7 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
                 ),
               ),
             ],
-            
+
             // Progress indicator
             if (extractionState.isExtracting) ...[
               const SizedBox(height: 16),
@@ -162,7 +162,7 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
-            
+
             // Error display
             if (extractionState.error != null) ...[
               const SizedBox(height: 16),
@@ -186,7 +186,7 @@ class _ExtractionDialogState extends ConsumerState<ExtractionDialog> {
                 ),
               ),
             ],
-            
+
             // Last result
             if (extractionState.lastResult != null && !extractionState.isExtracting) ...[
               const SizedBox(height: 16),

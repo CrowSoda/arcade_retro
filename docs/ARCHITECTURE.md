@@ -163,7 +163,7 @@ Metadata in `.sigmf-meta` JSON file.
 
 PyTorch state dict with:
 - ResNet18 backbone weights
-- FPN neck weights  
+- FPN neck weights
 - RPN (region proposal network) weights
 - Detection head weights
 

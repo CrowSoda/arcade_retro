@@ -1,5 +1,5 @@
 /// G20 Dialogs and Toasts - Reusable UI components
-/// 
+///
 /// Provides consistent styling for toasts, confirmations, and error dialogs
 library;
 
@@ -12,30 +12,30 @@ import '../config/theme.dart';
 // =============================================================================
 
 /// Show a fading toast overlay that disappears after duration
-/// 
+///
 /// Example:
 /// ```dart
 /// showG20Toast(context, 'Saved!', icon: Icons.check_circle);
 /// showG20Toast(context, 'Error!', icon: Icons.error, color: Colors.red);
 /// ```
 void showG20Toast(
-  BuildContext context, 
+  BuildContext context,
   String message, {
-  IconData icon = Icons.check_circle, 
+  IconData icon = Icons.check_circle,
   Color color = Colors.green,
   Duration duration = const Duration(seconds: 2),
 }) {
   final overlay = Overlay.of(context);
   late OverlayEntry entry;
   bool isRemoved = false;
-  
+
   void safeRemove() {
     if (!isRemoved) {
       isRemoved = true;
       entry.remove();
     }
   }
-  
+
   entry = OverlayEntry(
     builder: (context) => Positioned(
       top: MediaQuery.of(context).size.height * 0.15,
@@ -55,9 +55,9 @@ void showG20Toast(
       ),
     ),
   );
-  
+
   overlay.insert(entry);
-  
+
   // Safety fallback: ensure removal after max duration even if animation fails
   Future.delayed(duration + const Duration(seconds: 3), safeRemove);
 }
@@ -93,10 +93,10 @@ class _FadingToastState extends State<_FadingToast> with SingleTickerProviderSta
     _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
-    
+
     // Fade in
     _controller.forward();
-    
+
     // Wait then fade out
     Future.delayed(widget.duration - const Duration(milliseconds: 300), () {
       if (mounted) {
@@ -140,9 +140,9 @@ class _FadingToastState extends State<_FadingToast> with SingleTickerProviderSta
 // =============================================================================
 
 /// Show a confirmation dialog with warning styling
-/// 
+///
 /// Returns true if user confirms, false if cancelled
-/// 
+///
 /// Example:
 /// ```dart
 /// final confirmed = await showG20ConfirmDialog(
@@ -173,7 +173,7 @@ Future<bool> showG20ConfirmDialog(
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              title, 
+              title,
               style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16),
             ),
           ),
@@ -206,7 +206,7 @@ Future<bool> showG20ConfirmDialog(
 // =============================================================================
 
 /// Show an error dialog with red styling
-/// 
+///
 /// Example:
 /// ```dart
 /// showG20ErrorDialog(
@@ -232,7 +232,7 @@ Future<void> showG20ErrorDialog(
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              title, 
+              title,
               style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16),
             ),
           ),
@@ -282,9 +282,9 @@ Future<void> showG20ErrorDialog(
 // =============================================================================
 
 /// A single option button for segmented selectors
-/// 
+///
 /// Used for FFT size, FPS, threshold, etc. selectors
-/// 
+///
 /// Example:
 /// ```dart
 /// SegmentedOption<int>(
@@ -316,7 +316,7 @@ class SegmentedOption<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = activeColor ?? G20Colors.primary;
-    
+
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -358,7 +358,7 @@ class SegmentedOption<T> extends StatelessWidget {
 }
 
 /// A row of segmented options
-/// 
+///
 /// Example:
 /// ```dart
 /// SegmentedSelector<int>(

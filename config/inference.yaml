@@ -6,7 +6,7 @@ model:
   onnx_path: "models/yolov8s_rf.onnx"     # ONNX model (development)
   tensorrt_path: "models/yolov8s_rf.engine"  # TensorRT engine (production)
   # CRITICAL: .engine files must be built ON THE TARGET SYSTEM
-  
+
 # Class names (customize for your signal types)
 class_names:
   - "signal_a"
@@ -19,12 +19,12 @@ class_names:
 input:
   size: [640, 640]              # Model input size [width, height]
   normalize: true               # Normalize to 0-1
-  
+
 # Detection thresholds
 thresholds:
   confidence: 0.25              # Minimum confidence to keep detection
   nms_iou: 0.45                 # IoU threshold for NMS
-  
+
 # Performance settings
 performance:
   batch_size: 1                 # Batch size (1 for real-time)

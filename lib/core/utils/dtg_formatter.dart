@@ -1,7 +1,7 @@
 /// Date Time Group (DTG) formatting utilities
 /// Military standard format: DDHHMMZ MMM YY
 
-const _months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+const _months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
 /// Format DateTime to display-friendly DTG: DD MMM HH:MM

@@ -130,7 +130,7 @@ windows/x64/
 linux/flutter/ephemeral/
 linux/build/
 
-# macOS build  
+# macOS build
 macos/Flutter/ephemeral/
 macos/build/
 *.app

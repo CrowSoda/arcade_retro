@@ -1,13 +1,13 @@
 // lib/core/database/signal_database.dart
 /// Signal Database - Persistent storage for signal metadata
-/// 
+///
 /// Each signal entry includes:
 /// - Name (signal class name)
 /// - Modulation type and rate
 /// - Data labels count (how many samples trained on)
 /// - F1 score from last training
 /// - Training history
-/// 
+///
 /// Updated by training tab when models are trained
 
 import 'dart:convert';
@@ -128,18 +128,18 @@ class SignalEntry {
   double? modRate;        // Symbol rate in sps
   double? bandwidth;      // Signal bandwidth in kHz
   String? notes;
-  
+
   // Training stats
   int totalDataLabels;    // Total labeled samples across all training
   double? f1Score;        // Best/latest F1 score
   double? precision;      // Best/latest precision
   double? recall;         // Best/latest recall
   int timesAbove90;       // Detection count with >90% confidence
-  
+
   // History
   List<TrainingResult> trainingHistory;
   List<DetectionRecord> detectionHistory;  // Recent high-confidence detections
-  
+
   // Timestamps
   DateTime created;
   DateTime modified;
@@ -169,7 +169,7 @@ class SignalEntry {
   int get sampleCount => totalDataLabels;
 
   /// Get the latest training result
-  TrainingResult? get latestTraining => 
+  TrainingResult? get latestTraining =>
       trainingHistory.isNotEmpty ? trainingHistory.last : null;
 
   /// Get best F1 score from history
@@ -296,72 +296,84 @@ class SignalEntry {
 /// Signal Database Notifier - persists to config/signals.json
 class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
   static const _filePath = 'config/signals.json';
-  
-  SignalDatabaseNotifier() : super(_loadFromDiskSync());
+  bool _isLoaded = false;
 
-  /// Synchronously load from disk at startup
-  static List<SignalEntry> _loadFromDiskSync() {
-    try {
-      final file = File(_filePath);
-      if (file.existsSync()) {
-        final jsonStr = file.readAsStringSync();
-        final List<dynamic> jsonList = json.decode(jsonStr);
-        final entries = jsonList.map((j) => SignalEntry.fromJson(j)).toList();
-        debugPrint('[SignalDB] Loaded ${entries.length} signals from disk');
-        return entries;
-      }
-    } catch (e) {
-      debugPrint('[SignalDB] Error loading from disk: $e');
-    }
-    
-    // Return default entries if no file exists
+  /// Creates notifier and starts async load from disk.
+  /// Uses async pattern to avoid blocking UI thread.
+  SignalDatabaseNotifier() : super(_defaultEntries()) {
+    _loadFromDisk();  // Fire async load, state updates when complete
+  }
+
+  /// Get loading status
+  bool get isLoaded => _isLoaded;
+
+  /// Default entries shown while loading or if no file exists
+  static List<SignalEntry> _defaultEntries() {
     return [
       SignalEntry(
-        id: '1', 
-        name: 'creamy_chicken', 
-        modType: '--', 
-        totalDataLabels: 127, 
-        f1Score: 0.91, 
+        id: '1',
+        name: 'creamy_chicken',
+        modType: '--',
+        totalDataLabels: 127,
+        f1Score: 0.91,
         timesAbove90: 47,
       ),
       SignalEntry(
-        id: '2', 
-        name: 'lte_uplink', 
-        modType: 'OFDM', 
-        modRate: 15000, 
-        bandwidth: 10000, 
-        totalDataLabels: 89, 
-        f1Score: 0.87, 
+        id: '2',
+        name: 'lte_uplink',
+        modType: 'OFDM',
+        modRate: 15000,
+        bandwidth: 10000,
+        totalDataLabels: 89,
+        f1Score: 0.87,
         timesAbove90: 23,
       ),
       SignalEntry(
-        id: '3', 
-        name: 'wifi_24', 
-        modType: 'OFDM', 
-        modRate: 20000, 
-        bandwidth: 20000, 
-        totalDataLabels: 156, 
-        f1Score: 0.82, 
+        id: '3',
+        name: 'wifi_24',
+        modType: 'OFDM',
+        modRate: 20000,
+        bandwidth: 20000,
+        totalDataLabels: 156,
+        f1Score: 0.82,
         timesAbove90: 56,
       ),
       SignalEntry(
-        id: '4', 
-        name: 'bluetooth', 
-        modType: 'GFSK', 
-        modRate: 1000000, 
-        bandwidth: 1000, 
-        totalDataLabels: 78, 
-        f1Score: 0.79, 
+        id: '4',
+        name: 'bluetooth',
+        modType: 'GFSK',
+        modRate: 1000000,
+        bandwidth: 1000,
+        totalDataLabels: 78,
+        f1Score: 0.79,
         timesAbove90: 18,
       ),
       SignalEntry(
-        id: '5', 
-        name: 'unk_220001ZJAN26_825', 
-        modType: '--', 
-        totalDataLabels: 34, 
+        id: '5',
+        name: 'unk_220001ZJAN26_825',
+        modType: '--',
+        totalDataLabels: 34,
         timesAbove90: 8,
       ),
     ];
+  }
+
+  /// Async load from disk - does not block UI thread
+  Future<void> _loadFromDisk() async {
+    try {
+      final file = File(_filePath);
+      if (await file.exists()) {
+        final jsonStr = await file.readAsString();
+        final List<dynamic> jsonList = json.decode(jsonStr);
+        final entries = jsonList.map((j) => SignalEntry.fromJson(j)).toList();
+        state = entries;
+        debugPrint('[SignalDB] Loaded ${entries.length} signals from disk (async)');
+      }
+    } catch (e) {
+      debugPrint('[SignalDB] Error loading from disk: $e');
+      // Keep default entries on error
+    }
+    _isLoaded = true;
   }
 
   Future<void> _saveToDisk() async {
@@ -422,7 +434,7 @@ class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
   /// Add training result to a signal (by name or create new)
   void addTrainingResult(String signalName, TrainingResult result) {
     final existing = getByName(signalName);
-    
+
     if (existing != null) {
       existing.addTrainingResult(result);
       state = [...state]; // Trigger rebuild
@@ -440,7 +452,7 @@ class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
       );
       addSignal(newEntry);
     }
-    
+
     debugPrint('[SignalDB] Training result added for "$signalName": F1=${result.f1Score.toStringAsFixed(2)}, labels=${result.dataLabels}');
   }
 
@@ -486,7 +498,7 @@ class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
     entry.addDetectionRecord(record);
     state = [...state]; // Trigger rebuild
     _saveToDisk();
-    
+
     debugPrint('[SignalDB] Detection logged: $signalName @ ${freqMHz.toStringAsFixed(2)} MHz, score=${(score * 100).toStringAsFixed(0)}%');
   }
 
@@ -494,7 +506,7 @@ class SignalDatabaseNotifier extends StateNotifier<List<SignalEntry>> {
   SignalEntry getOrCreate(String signalName) {
     final existing = getByName(signalName);
     if (existing != null) return existing;
-    
+
     // Create new entry
     final newEntry = SignalEntry(
       id: 'sig_${DateTime.now().millisecondsSinceEpoch}',

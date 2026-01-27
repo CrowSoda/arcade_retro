@@ -21,16 +21,16 @@ dependencies:
 
   # Charts & Visualization
   fl_chart: ^0.66.0
-  
+
   # Maps - Flutter Map with Vector Tiles + PMTiles (supports Windows)
   flutter_map: ^7.0.0
   vector_map_tiles: ^8.0.0
   vector_map_tiles_pmtiles: ^1.5.0
   latlong2: ^0.9.0
-  
+
   # DSP / FFT
   fftea: ^1.0.0
-  
+
   # Code Generation
   freezed_annotation: ^2.4.0
   json_annotation: ^4.8.0
@@ -48,17 +48,20 @@ dependencies:
 
   # UI Components
   cupertino_icons: ^1.0.8
-  
+
   # Video playback for H.264 streaming (hardware accelerated)
   media_kit: ^1.1.10+1
   media_kit_video: ^1.2.4
   media_kit_libs_video: ^1.0.4
 
+  # Window management (reliable window close detection for backend cleanup)
+  window_manager: ^0.4.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-  
+
   # Code Generation
   build_runner: ^2.4.0
   freezed: ^2.4.0

@@ -1,5 +1,5 @@
 /// Waterfall Commands - WebSocket command helpers for waterfall control
-/// 
+///
 /// Provides type-safe command builders for backend communication
 library;
 
@@ -16,7 +16,7 @@ enum WaterfallCommand {
 }
 
 /// Build a JSON command message for the backend
-/// 
+///
 /// Returns encoded JSON string ready to send over WebSocket
 class WaterfallCommandBuilder {
   /// Set waterfall FPS (frames per second)

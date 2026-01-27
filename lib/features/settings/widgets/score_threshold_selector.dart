@@ -1,5 +1,5 @@
 /// Score Threshold Selector Widget
-/// 
+///
 /// Allows user to set detection confidence threshold
 /// Only detections above this threshold will be displayed
 library;
@@ -16,10 +16,10 @@ class ScoreThresholdSelector extends ConsumerWidget {
 
   void _setScoreThreshold(WidgetRef ref, double newThreshold) {
     debugPrint('[Settings] Score threshold changed: ${(newThreshold * 100).round()}%');
-    
+
     // Update provider state
     ref.read(scoreThresholdProvider.notifier).state = newThreshold;
-    
+
     // DIRECT CALL to backend
     ref.read(videoStreamProvider.notifier).setScoreThreshold(newThreshold);
   }

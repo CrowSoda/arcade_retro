@@ -1,5 +1,5 @@
 /// Collapse Handle Widget - Panel collapse/expand control
-/// 
+///
 /// Draggable handle for collapsing/expanding the right panel
 library;
 

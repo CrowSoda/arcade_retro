@@ -28,15 +28,15 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
   VectorTileProvider? _tileProvider;
   bool _isLoading = true;
   String? _error;
-  
+
   // Debounce timer to prevent message queue flooding during fast zoom
   Timer? _positionDebouncer;
-  
+
   // Freeze state during zoom to prevent tile loading spam
   bool _isZooming = false;
   Timer? _zoomEndTimer;
   double? _lastStableZoom;
-  
+
   // Selected detection for popup
   Detection? _selectedDetection;
 
@@ -57,7 +57,7 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
   Future<void> _loadPmTiles() async {
     try {
       final pmtilesPath = _getPmtilesPath();
-      
+
       // Check if file exists
       final file = File(pmtilesPath);
       if (!file.existsSync()) {
@@ -89,7 +89,7 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
     // Fallback: running from parent directory
     return '$currentDir/g20_demo/data/map/20260119.pmtiles'.replaceAll('\\', '/');
   }
-  
+
   /// Called during zoom gestures - sets freeze state and delays tile loading
   void _onZoomStart() {
     _zoomEndTimer?.cancel();
@@ -98,7 +98,7 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
       setState(() => _isZooming = true);
     }
   }
-  
+
   /// Called when zoom gesture ends - waits before unfreezing to allow settle
   void _onZoomEnd() {
     _zoomEndTimer?.cancel();
@@ -108,12 +108,12 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
       }
     });
   }
-  
+
   /// Find detection near tap point
   Detection? _findDetectionAtPoint(LatLng tapPoint, List<Detection> detections) {
     const tapRadius = 0.002; // ~200m at equator
     for (final det in detections) {
-      final dist = (det.latitude - tapPoint.latitude).abs() + 
+      final dist = (det.latitude - tapPoint.latitude).abs() +
                    (det.longitude - tapPoint.longitude).abs();
       if (dist < tapRadius) {
         return det;
@@ -208,7 +208,7 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
                 if (hasGesture && _selectedDetection != null) {
                   setState(() => _selectedDetection = null);
                 }
-                
+
                 if (hasGesture && position.zoom != null) {
                   final currentZoom = position.zoom!;
                   final previousZoom = _lastStableZoom ?? mapState.mapZoom;
@@ -216,7 +216,7 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
                     _onZoomStart();
                   }
                 }
-                
+
                 _positionDebouncer?.cancel();
                 _positionDebouncer = Timer(const Duration(milliseconds: 100), () {
                   if (mounted && position.center != null) {
@@ -238,7 +238,7 @@ class _MapDisplayState extends ConsumerState<MapDisplay> {
                   'protomaps': _tileProvider!,
                 }),
                 theme: ProtomapsThemes.dark(),
-                tileDelay: _isZooming 
+                tileDelay: _isZooming
                   ? const Duration(milliseconds: 500)
                   : const Duration(milliseconds: 50),
                 maximumTileSubstitutionDifference: 3,
@@ -335,7 +335,7 @@ class _DetectionPopup extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = getSOIColor(detection.className);
     final dtg = formatDTG(detection.timestamp);
-    
+
     return Positioned(
       top: 60,
       left: 16,

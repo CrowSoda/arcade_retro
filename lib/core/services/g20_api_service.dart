@@ -107,33 +107,33 @@ class CollectionResult {
 }
 
 /// G20 API Service - Unified interface for G20 platform communication
-/// 
+///
 /// This service provides a clean interface for communicating with the G20 backend
 /// running on Nvidia Jetson Orin with Epiq Sidekiq NV100 SDR.
-/// 
-/// Currently uses simulated responses for development. 
+///
+/// Currently uses simulated responses for development.
 /// TODO: Replace with real gRPC calls when hardware is available.
 class G20ApiService {
   // Connection settings
   String _host = 'localhost';
   int _port = 50051;
-  
+
   // Connection state
   G20ConnectionState _connectionState = G20ConnectionState.disconnected;
   final _connectionStateController = StreamController<G20ConnectionState>.broadcast();
-  
+
   // Simulation settings
   bool _simulateErrors = false;
   double _simulateErrorRate = 0.0;  // 0.0 to 1.0
   int _minDelayMs = 100;
   int _maxDelayMs = 300;
-  
+
   // Random for simulation
   final _random = math.Random();
 
   /// Stream of connection state changes
   Stream<G20ConnectionState> get connectionState => _connectionStateController.stream;
-  
+
   /// Current connection state
   G20ConnectionState get currentConnectionState => _connectionState;
 
@@ -166,7 +166,7 @@ class G20ApiService {
   // ============================================================
 
   /// Connect to G20 backend
-  /// 
+  ///
   /// [host] - Backend host address (default: localhost)
   /// [port] - gRPC port (default: 50051)
   Future<bool> connect({String? host, int? port}) async {
@@ -207,7 +207,7 @@ class G20ApiService {
   // ============================================================
 
   /// Set SDR tuning parameters
-  /// 
+  ///
   /// [centerMHz] - Center frequency in MHz (30-6000 MHz for NV100)
   /// [bwMHz] - Bandwidth in MHz (0.1-50 MHz for NV100)
   Future<TuningResult> setTuning({
@@ -240,7 +240,7 @@ class G20ApiService {
   }
 
   /// Set RX gain
-  /// 
+  ///
   /// [gainDb] - Gain in dB (0-34 dB for NV100, 0.5 dB steps)
   Future<bool> setGain(double gainDb) async {
     debugPrint('[G20API] setGain($gainDb dB)');
@@ -262,7 +262,7 @@ class G20ApiService {
   // ============================================================
 
   /// Assign RX2 to manual mode (viewing)
-  /// 
+  ///
   /// In manual mode, RX2 is used for manual viewing while RX1 continues
   /// auto-scanning. On a 2-RX system, this means no active collection.
   Future<RxAssignmentResult> assignRx2ToManual() async {
@@ -321,7 +321,7 @@ class G20ApiService {
   // ============================================================
 
   /// Trigger manual collection
-  /// 
+  ///
   /// [signalName] - Name/label for the captured signal
   /// [durationSec] - Capture duration in seconds
   Future<CollectionResult> triggerCapture({
@@ -356,7 +356,7 @@ class G20ApiService {
 
   String _generateDTG([DateTime? time]) {
     final t = time ?? DateTime.now().toUtc();
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                     'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     final hh = t.hour.toString().padLeft(2, '0');
     final mm = t.minute.toString().padLeft(2, '0');

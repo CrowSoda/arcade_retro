@@ -14,14 +14,14 @@ service InferenceService {
   rpc UnloadModel(UnloadModelRequest) returns (UnloadModelResponse);
   rpc GetModels(GetModelsRequest) returns (GetModelsResponse);
   rpc GetActiveModel(GetActiveModelRequest) returns (GetActiveModelResponse);
-  
+
   // Inference control
   rpc StartInference(StartInferenceRequest) returns (StartInferenceResponse);
   rpc StopInference(StopInferenceRequest) returns (StopInferenceResponse);
-  
+
   // Streaming detections - main data flow
   rpc StreamDetections(StreamDetectionsRequest) returns (stream DetectionFrame);
-  
+
   // Training
   rpc StartTraining(StartTrainingRequest) returns (StartTrainingResponse);
   rpc StopTraining(StopTrainingRequest) returns (StopTrainingResponse);

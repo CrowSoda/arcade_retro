@@ -1,5 +1,5 @@
 /// Waterfall PSD View - Combined waterfall display and PSD chart
-/// 
+///
 /// Shows waterfall spectrogram (top 70%) and PSD line chart (bottom 30%)
 library;
 

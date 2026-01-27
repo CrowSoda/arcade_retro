@@ -1,5 +1,5 @@
 /// Shell Widgets - Barrel export
-/// 
+///
 /// Export all shell widgets for easy import
 library;
 

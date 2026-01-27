@@ -1,5 +1,5 @@
 /// Settings Widgets - Barrel file
-/// 
+///
 /// Export all settings-related widgets for easy import
 library;
 

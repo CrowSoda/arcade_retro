@@ -622,10 +622,10 @@ class _WaterfallFpsSelector extends ConsumerWidget {
 
   void _setFps(WidgetRef ref, int newFps) {
     debugPrint('[Settings] FPS button tapped: $newFps');
-    
+
     // Update provider state (persisted)
     ref.read(waterfallFpsProvider.notifier).setValue(newFps);
-    
+
     // DIRECT CALL to backend - no listener needed!
     ref.read(videoStreamProvider.notifier).setFps(newFps);
   }
@@ -650,7 +650,7 @@ class _WaterfallFpsSelector extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: fps < 30 
+                color: fps < 30
                     ? Colors.orange.withValues(alpha: 0.2)
                     : G20Colors.primary.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(4),
@@ -735,7 +735,7 @@ class _FpsOption extends StatelessWidget {
     // Highlight slow FPS options with orange
     final isSlowFps = value < 30;
     final activeColor = isSlowFps ? Colors.orange : G20Colors.primary;
-    
+
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
@@ -770,10 +770,10 @@ class _ScoreThresholdSelector extends ConsumerWidget {
 
   void _setScoreThreshold(WidgetRef ref, double newThreshold) {
     debugPrint('[Settings] Score threshold changed: ${(newThreshold * 100).round()}%');
-    
+
     // Update provider state (persisted)
     ref.read(scoreThresholdProvider.notifier).setValue(newThreshold);
-    
+
     // DIRECT CALL to backend - no listener needed!
     ref.read(videoStreamProvider.notifier).setScoreThreshold(newThreshold);
   }
@@ -918,10 +918,10 @@ class _FftSizeSelector extends ConsumerWidget {
 
   void _setFftSize(WidgetRef ref, int newSize) {
     debugPrint('[Settings] FFT size button tapped: $newSize');
-    
+
     // Update provider state (persisted automatically)
     ref.read(waterfallFftSizeProvider.notifier).setValue(newSize);
-    
+
     // Send to backend (includes cuFFT warmup - may take 100-500ms)
     ref.read(videoStreamProvider.notifier).setFftSize(newSize);
   }
@@ -1044,8 +1044,8 @@ class _FftSizeOption extends StatelessWidget {
             Text(
               sublabel,
               style: TextStyle(
-                color: selected 
-                    ? G20Colors.primary.withValues(alpha: 0.7) 
+                color: selected
+                    ? G20Colors.primary.withValues(alpha: 0.7)
                     : G20Colors.textSecondaryDark,
                 fontSize: 10,
               ),
@@ -1069,7 +1069,7 @@ class _DbRangeSelector extends ConsumerWidget {
     if (maxDb != null) {
       ref.read(waterfallMaxDbProvider.notifier).setValue(maxDb);
     }
-    
+
     // Send to backend
     final currentMin = ref.read(waterfallMinDbProvider);
     final currentMax = ref.read(waterfallMaxDbProvider);
@@ -1081,7 +1081,7 @@ class _DbRangeSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final minDb = ref.watch(waterfallMinDbProvider);
     final maxDb = ref.watch(waterfallMaxDbProvider);
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1206,10 +1206,10 @@ class _ColormapSelector extends ConsumerWidget {
 
   void _setColormap(WidgetRef ref, int newColormap) {
     debugPrint('[Settings] Colormap changed: ${colormapNames[newColormap]}');
-    
+
     // Update provider state (persisted)
     ref.read(waterfallColormapProvider.notifier).setValue(newColormap);
-    
+
     // Send to backend
     ref.read(videoStreamProvider.notifier).setColormap(newColormap);
   }
@@ -1249,8 +1249,8 @@ class _ColormapSelector extends ConsumerWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
-                      color: isSelected 
-                          ? G20Colors.primary.withValues(alpha: 0.2) 
+                      color: isSelected
+                          ? G20Colors.primary.withValues(alpha: 0.2)
                           : G20Colors.cardDark,
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(
@@ -1286,7 +1286,7 @@ class _StatsOverlayToggle extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final showStats = ref.watch(showStatsOverlayProvider);
-    
+
     return SwitchListTile(
       title: const Text('Show Stats Overlay'),
       subtitle: Text(
@@ -1313,7 +1313,7 @@ class _SkipFirstFrameToggle extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final skipFirst = ref.watch(skipFirstWaterfallFrameProvider);
-    
+
     return SwitchListTile(
       title: const Text('Skip First Waterfall Frame'),
       subtitle: Text(

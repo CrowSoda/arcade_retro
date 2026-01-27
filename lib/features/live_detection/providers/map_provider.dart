@@ -63,16 +63,16 @@ class MapStateNotifier extends StateNotifier<MapState> {
   Future<void> _loadPersistedState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Load hidden SOIs
       final hiddenList = prefs.getStringList(_prefsKeyHiddenSOIs);
       final hidden = hiddenList != null ? Set<String>.from(hiddenList) : <String>{};
-      
+
       // Load map position
       final lat = prefs.getDouble(_prefsKeyMapLat) ?? 39.7275;
       final lon = prefs.getDouble(_prefsKeyMapLon) ?? -104.7303;
       final zoom = prefs.getDouble(_prefsKeyMapZoom) ?? 13.0;
-      
+
       state = state.copyWith(
         hiddenSOIs: hidden,
         mapCenter: LatLng(lat, lon),
@@ -108,8 +108,8 @@ class MapStateNotifier extends StateNotifier<MapState> {
   /// Toggle between waterfall and map view
   void toggleDisplayMode() {
     state = state.copyWith(
-      displayMode: state.displayMode == DisplayMode.waterfall 
-          ? DisplayMode.map 
+      displayMode: state.displayMode == DisplayMode.waterfall
+          ? DisplayMode.map
           : DisplayMode.waterfall,
     );
   }
@@ -194,7 +194,7 @@ class MapStateNotifier extends StateNotifier<MapState> {
     final latSpan = maxLat - minLat;
     final lonSpan = maxLon - minLon;
     final padding = math.max(latSpan, lonSpan) * 0.1;
-    
+
     minLat -= padding;
     maxLat += padding;
     minLon -= padding;
@@ -254,7 +254,7 @@ const Map<String, Color> _soiColorPalette = {
   'creamy_fish': Color(0xFF9C27B0),     // Purple
   'creamy_lamb': Color(0xFF00BCD4),     // Cyan
   'creamy_turkey': Color(0xFFE91E63),   // Pink
-  
+
   // Known protocols - distinct colors
   'lte_uplink': Color(0xFF3F51B5),      // Indigo
   'wifi_24': Color(0xFF8BC34A),         // Light Green
@@ -282,33 +282,33 @@ final Set<int> _usedHues = {};
 /// NO COLOR REPEATS - each class gets a unique color
 Color getSOIColor(String soiName) {
   final lowerName = soiName.toLowerCase();
-  
+
   // Check known classes first (exact match on lowercase)
   for (final entry in _soiColorPalette.entries) {
     if (entry.key.toLowerCase() == lowerName) {
       return entry.value;
     }
   }
-  
+
   // NO PARTIAL MATCHES - each signal class gets its own unique color
-  
+
   // For UNK signals (unk_DTG_freq format) - generate unique color based on hash
   // Use golden ratio to spread hues evenly and avoid collisions
   final hash = soiName.hashCode.abs();
-  
+
   // Start with hash-based hue, then adjust if collision
   var hue = (hash * _goldenRatio * 360).round() % 360;
-  
+
   // Avoid too-similar hues (within 15 degrees of used hues)
   int attempts = 0;
   while (_usedHues.any((used) => (hue - used).abs() < 15 || (hue - used).abs() > 345) && attempts < 24) {
     hue = (hue + 15) % 360;
     attempts++;
   }
-  
+
   // Mark this hue as used
   _usedHues.add(hue);
-  
+
   // UNK signals get a distinct red-tinted color scheme (hue 0-30 range shifted)
   // to visually distinguish them from known signals
   if (lowerName.startsWith('unk')) {
@@ -316,7 +316,7 @@ Color getSOIColor(String soiName) {
     final unkHue = ((hash % 60) + 330) % 360; // 330-390 (330-360, 0-30) = red/magenta
     return HSLColor.fromAHSL(1.0, unkHue.toDouble(), 0.75, 0.50).toColor();
   }
-  
+
   // Other unknown signals get full spectrum
   return HSLColor.fromAHSL(1.0, hue.toDouble(), 0.70, 0.45).toColor();
 }

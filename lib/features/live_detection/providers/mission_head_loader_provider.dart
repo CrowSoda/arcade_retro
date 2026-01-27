@@ -46,7 +46,7 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
     _ref.listen<MissionState>(missionProvider, (previous, next) {
       _onMissionChanged(previous, next);
     });
-    
+
     // Check initial state
     final currentMission = _ref.read(missionProvider).activeMission;
     if (currentMission != null) {
@@ -56,7 +56,7 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
 
   void _onMissionChanged(MissionState? previous, MissionState next) {
     final mission = next.activeMission;
-    
+
     // Mission cleared - unload all heads
     if (mission == null && previous?.activeMission != null) {
       debugPrint('[MissionHeadLoader] Mission cleared - unloading all heads');
@@ -64,9 +64,9 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
       _lastMissionPath = null;
       return;
     }
-    
+
     if (mission == null) return;
-    
+
     // Only apply if mission actually changed (different file or modified)
     if (_lastMissionPath == mission.filePath) {
       // Same mission file - check if modified timestamp changed
@@ -74,13 +74,13 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
         return;  // No change
       }
     }
-    
+
     _lastMissionPath = mission.filePath;
-    
+
     final signals = mission.effectiveSignals;
     debugPrint('[MissionHeadLoader] Mission changed: ${mission.name}');
     debugPrint('[MissionHeadLoader] Loading heads: $signals');
-    
+
     _loadHeadsForMission(signals);
   }
 
@@ -90,26 +90,26 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
       _unloadAllHeads();
       return;
     }
-    
+
     // Find heads to unload (in current but not in new)
     final currentHeads = Set<String>.from(state.loadedHeads);
     final newHeads = Set<String>.from(signals);
     final toUnload = currentHeads.difference(newHeads).toList();
-    
+
     if (toUnload.isNotEmpty) {
       debugPrint('[MissionHeadLoader] Unloading old heads: $toUnload');
       _ref.read(videoStreamProvider.notifier).unloadHeads(toUnload);
     }
-    
+
     state = state.copyWith(
       requestedHeads: signals,
       isLoading: true,
     );
-    
+
     // Call video stream to load new heads
     debugPrint('[MissionHeadLoader] Loading heads: $signals');
     _ref.read(videoStreamProvider.notifier).loadHeads(signals);
-    
+
     // Update state (actual loaded heads confirmed by backend response)
     state = state.copyWith(
       loadedHeads: signals,  // Optimistic update
@@ -122,9 +122,9 @@ class MissionHeadLoaderNotifier extends StateNotifier<MissionHeadState> {
       requestedHeads: [],
       isLoading: true,
     );
-    
+
     _ref.read(videoStreamProvider.notifier).unloadHeads();
-    
+
     state = state.copyWith(
       loadedHeads: [],
       isLoading: false,

@@ -45,7 +45,7 @@ def process_chunk(self, iq_data: np.ndarray, pts: float, score_threshold: float 
     spec = self.compute_spectrogram(iq_data)  # 4096 FFT, 80dB, 1024x1024
     with torch.inference_mode():
         outputs = self.model(spec.half())
-    
+
     # Parse to Detection objects
     detections = []
     for i in range(len(boxes)):
@@ -138,7 +138,7 @@ class LabelBox {
 ```python
 class TrainWorker(QObject):
     """Worker to train Faster R-CNN detection model."""
-    
+
     def run(self):
         # Training dataset structure
         class DetectionDataset(Dataset):
@@ -154,7 +154,7 @@ class TrainWorker(QObject):
                         #     {"label": "signal", "x_min": 100, "y_min": 200, "x_max": 300, "y_max": 400}
                         #   ]
                         # }
-                        
+
             def __getitem__(self, idx):
                 img = Image.open(img_path).convert("RGB")
                 target = {
@@ -163,7 +163,7 @@ class TrainWorker(QObject):
                     "image_id": torch.tensor([idx])
                 }
                 return img, target
-        
+
         # Model construction
         def build_model(num_classes, backbone, pretrained, trainable_layers):
             if backbone == "resnet50":
@@ -172,7 +172,7 @@ class TrainWorker(QObject):
                 bb = resnet_fpn_backbone("resnet18", pretrained=pretrained, trainable_layers=trainable_layers)
                 m = FasterRCNN(bb, num_classes=num_classes)
             return m
-        
+
         # Training loop
         for epoch in range(epochs):
             model.train()
@@ -181,13 +181,13 @@ class TrainWorker(QObject):
                 loss = sum(loss_dict.values())
                 loss.backward()
                 optimizer.step()
-            
+
             # Validation with IoU-based metrics
             model.eval()
             for imgs, tgts in val_loader:
                 outputs = model(imgs)
                 # Calculate TP/FP/FN with IoU >= 0.5
-            
+
             # Early stopping based on F1
             if f1 > best_f1:
                 best_f1 = f1
@@ -195,7 +195,7 @@ class TrainWorker(QObject):
                 epochs_without_improve += 1
                 if epochs_without_improve >= early_stop_patience:
                     break
-        
+
         torch.save(model.state_dict(), out_model)
 ```
 
@@ -204,42 +204,42 @@ class TrainWorker(QObject):
 ```python
 class ChunkWorker(QObject):
     """Convert IQ + labels to spectrogram images + bbox JSON."""
-    
+
     def run(self):
         # Process each IQ file
         for datafile in data_files:
             # Load IQ data
             iq_data = np.frombuffer(raw, dtype=np.complex64)
-            
+
             # Load labels (time/freq boxes)
             with open(labels_path) as f:
                 signals = json.load(f).get("signals", [])
             # signals format:
             # [{"time_start": 0.1, "time_stop": 0.3, "freq_low": 915.0, "freq_high": 916.0, "label": "signal"}, ...]
-            
+
             # Process each chunk
             for chunk_idx in range(n_chunks):
                 chunk_data = iq_data[start:end]
-                
+
                 # Generate spectrogram
                 f_vals, t_vals, Zxx = stft(chunk_data, fs=sr, nperseg=nfft, noverlap=noverlap)
                 sxx_db = 10 * np.log10(np.abs(Zxx)**2 + 1e-12)
-                
+
                 # Clamp to dynamic range
                 vmax = sxx_db.max()
                 vmin = vmax - dynamic_range
                 sxx_clamped = np.clip(sxx_db, vmin, vmax)
-                
+
                 # Resize to out_size x out_size
                 resized = cv2.resize(sxx_clamped, (out_size, out_size))
                 resized = np.flipud(resized)  # IMPORTANT: Flip vertical
-                
+
                 # Convert signal boxes to chunk-local pixel coordinates
                 for sig in signals:
                     if signal_overlaps_chunk(sig, chunk_start, chunk_end):
                         bbox = convert_to_pixel_coords(sig, chunk, freqs)
                         tile_bboxes.append(bbox)
-                
+
                 # Only save if has labels
                 if tile_bboxes:
                     plt.imsave(out_png, resized, cmap="gray")
@@ -262,14 +262,14 @@ class SignalEntry {
   double? modRate;                // Symbol rate in sps
   double? bandwidth;              // Signal bandwidth in kHz
   String? notes;
-  
+
   // Training stats
   int totalDataLabels;            // Total labeled samples across all training
   double? f1Score;                // Best/latest F1 score
   double? precision;
   double? recall;
   int timesAbove90;               // Detection count with >90% confidence
-  
+
   List<TrainingResult> trainingHistory;
   DateTime created;
   DateTime modified;
@@ -355,7 +355,7 @@ class MissionNotifier extends StateNotifier<MissionState> {
     state = state.copyWith(activeMission: mission);
     return true;
   }
-  
+
   Future<bool> saveMission({String? newPath}) async {
     final mission = state.activeMission;
     await mission.saveToFile(savePath);

@@ -11,7 +11,7 @@ import '../../live_detection/providers/rx_state_provider.dart';
 enum TuningMode {
   /// Automatic scanning - system controls tuning
   auto,
-  
+
   /// Manual control - user controls tuning, RX2 assigned
   manual,
 }
@@ -20,22 +20,22 @@ enum TuningMode {
 class TuningState {
   /// Current operating mode
   final TuningMode mode;
-  
+
   /// Selected timeout in seconds (null = permanent manual)
   final int? timeoutSeconds;
-  
+
   /// Remaining seconds until auto-resume (0 when in auto mode)
   final int remainingSeconds;
-  
+
   /// Whether RX2 is assigned to manual viewing
   final bool rx2InUse;
-  
+
   /// Whether a tuning operation is in progress
   final bool isTuning;
-  
+
   /// Last error message (null if no error)
   final String? errorMessage;
-  
+
   /// Timestamp of last state change
   final DateTime lastUpdated;
 
@@ -73,10 +73,10 @@ class TuningState {
 
   /// Check if in manual mode with active countdown
   bool get hasActiveCountdown => mode == TuningMode.manual && remainingSeconds > 0;
-  
+
   /// Check if in permanent manual mode (no timeout)
   bool get isPermanentManual => mode == TuningMode.manual && timeoutSeconds == null;
-  
+
   /// Format remaining time as MM:SS
   String get remainingTimeFormatted {
     if (remainingSeconds <= 0) return '00:00';
@@ -84,7 +84,7 @@ class TuningState {
     final sec = remainingSeconds % 60;
     return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
   }
-  
+
   /// Get mode display string
   String get modeDisplayString {
     if (mode == TuningMode.auto) {
@@ -113,15 +113,15 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
   }
 
   /// Set manual mode with optional timeout
-  /// 
+  ///
   /// [timeoutSeconds] - Seconds until auto-resume (null = permanent manual)
   /// Typical values: 60, 120, 300, or null
   Future<bool> setManualMode(int? timeoutSeconds) async {
     debugPrint('[TuningState] Setting manual mode (timeout: ${timeoutSeconds ?? "permanent"})');
-    
+
     // Cancel any existing countdown
     _countdownTimer?.cancel();
-    
+
     // Update state to show we're transitioning
     state = state.copyWith(
       isTuning: true,
@@ -130,7 +130,7 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
 
     // Assign RX2 to manual mode
     final result = await _apiService.assignRx2ToManual();
-    
+
     if (!result.success) {
       state = state.copyWith(
         isTuning: false,
@@ -161,10 +161,10 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
   /// Resume auto mode - restores RX2 to its saved state before manual mode
   Future<bool> resumeAuto() async {
     debugPrint('[TuningState] Resuming auto mode...');
-    
+
     // Cancel countdown
     _countdownTimer?.cancel();
-    
+
     // Update state to show we're transitioning
     state = state.copyWith(
       isTuning: true,
@@ -173,7 +173,7 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
 
     // Release RX2 via API
     final result = await _apiService.releaseRx2();
-    
+
     if (!result.success) {
       state = state.copyWith(
         isTuning: false,
@@ -201,14 +201,14 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
   }
 
   /// Update tuning parameters (center freq, bandwidth)
-  /// 
+  ///
   /// Also updates the SDR config provider for display consistency
   Future<bool> updateTuning({
     required double centerMHz,
     required double bwMHz,
   }) async {
     debugPrint('[TuningState] Updating tuning: $centerMHz MHz, BW: $bwMHz MHz');
-    
+
     state = state.copyWith(isTuning: true, clearError: true);
 
     final result = await _apiService.setTuning(
@@ -262,11 +262,11 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
   /// Extend timeout by additional seconds
   void extendTimeout(int additionalSeconds) {
     if (state.mode != TuningMode.manual) return;
-    
+
     state = state.copyWith(
       remainingSeconds: state.remainingSeconds + additionalSeconds,
     );
-    
+
     // Restart timer if it wasn't running (was in permanent mode)
     if (_countdownTimer == null || !_countdownTimer!.isActive) {
       _startCountdown();
@@ -276,7 +276,7 @@ class TuningStateNotifier extends StateNotifier<TuningState> {
   /// Switch to permanent manual (cancel timeout)
   void setPermanentManual() {
     if (state.mode != TuningMode.manual) return;
-    
+
     _countdownTimer?.cancel();
     state = state.copyWith(
       clearTimeout: true,
@@ -314,4 +314,135 @@ final tuningCountdownProvider = Provider<int>((ref) {
 /// Mode display string (convenience provider)
 final tuningModeDisplayProvider = Provider<String>((ref) {
   return ref.watch(tuningStateProvider).modeDisplayString;
+});
+
+// ============================================================
+// MANUAL CAPTURE PROVIDER (for RecordingIndicator)
+// ============================================================
+
+/// Capture phase enum
+enum CapturePhase {
+  /// Not capturing
+  idle,
+
+  /// Preparing to capture
+  preparing,
+
+  /// Actively capturing
+  capturing,
+
+  /// Finalizing capture
+  finalizing,
+}
+
+/// Manual capture state model
+class ManualCaptureState {
+  /// Current capture phase
+  final CapturePhase phase;
+
+  /// Signal name being captured
+  final String? signalName;
+
+  /// Capture progress (0.0 to 1.0)
+  final double captureProgress;
+
+  /// Total capture duration in minutes
+  final int captureDurationMinutes;
+
+  /// Number of captures in queue
+  final int queueLength;
+
+  /// Error message if any
+  final String? errorMessage;
+
+  const ManualCaptureState({
+    this.phase = CapturePhase.idle,
+    this.signalName,
+    this.captureProgress = 0.0,
+    this.captureDurationMinutes = 1,
+    this.queueLength = 0,
+    this.errorMessage,
+  });
+
+  ManualCaptureState copyWith({
+    CapturePhase? phase,
+    String? signalName,
+    double? captureProgress,
+    int? captureDurationMinutes,
+    int? queueLength,
+    String? errorMessage,
+    bool clearSignal = false,
+    bool clearError = false,
+  }) {
+    return ManualCaptureState(
+      phase: phase ?? this.phase,
+      signalName: clearSignal ? null : (signalName ?? this.signalName),
+      captureProgress: captureProgress ?? this.captureProgress,
+      captureDurationMinutes: captureDurationMinutes ?? this.captureDurationMinutes,
+      queueLength: queueLength ?? this.queueLength,
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+    );
+  }
+}
+
+/// Manual capture state notifier
+class ManualCaptureNotifier extends StateNotifier<ManualCaptureState> {
+  ManualCaptureNotifier() : super(const ManualCaptureState());
+
+  /// Start a capture
+  void startCapture({
+    required String signalName,
+    int durationMinutes = 1,
+  }) {
+    state = state.copyWith(
+      phase: CapturePhase.capturing,
+      signalName: signalName,
+      captureProgress: 0.0,
+      captureDurationMinutes: durationMinutes,
+      clearError: true,
+    );
+  }
+
+  /// Update capture progress
+  void updateProgress(double progress) {
+    state = state.copyWith(captureProgress: progress.clamp(0.0, 1.0));
+  }
+
+  /// Cancel the current capture
+  void cancel() {
+    debugPrint('[ManualCapture] Cancelling capture');
+    state = state.copyWith(
+      phase: CapturePhase.idle,
+      captureProgress: 0.0,
+      clearSignal: true,
+    );
+  }
+
+  /// Complete the capture
+  void complete() {
+    state = state.copyWith(
+      phase: CapturePhase.idle,
+      captureProgress: 0.0,
+      clearSignal: true,
+    );
+  }
+
+  /// Update queue length
+  void setQueueLength(int length) {
+    state = state.copyWith(queueLength: length);
+  }
+
+  /// Set error
+  void setError(String message) {
+    state = state.copyWith(
+      phase: CapturePhase.idle,
+      errorMessage: message,
+    );
+  }
+}
+
+/// Manual capture provider
+final manualCaptureProvider =
+    StateNotifierProvider<ManualCaptureNotifier, ManualCaptureState>((ref) {
+  return ManualCaptureNotifier();
 });
