@@ -213,7 +213,7 @@ class TestMagnitudeProperties:
 
     @given(
         arrays(
-            dtype=np.float32,
+            dtype=np.float64,  # Use float64 for better precision in log operations
             shape=st.integers(min_value=1, max_value=100),
             elements=st.floats(
                 min_value=1e-10, max_value=1e6, allow_nan=False, allow_infinity=False
@@ -226,8 +226,9 @@ class TestMagnitudeProperties:
         """
         Scaling by factor k adds 20*log10(k) dB.
         """
-        original_db = 20 * np.log10(magnitudes)
-        scaled_db = 20 * np.log10(magnitudes * scale_factor)
+        # Use float64 for log calculations to avoid float32 precision issues
+        original_db = 20 * np.log10(magnitudes.astype(np.float64))
+        scaled_db = 20 * np.log10((magnitudes * scale_factor).astype(np.float64))
 
         expected_diff = 20 * np.log10(scale_factor)
         actual_diff = scaled_db - original_db
@@ -235,7 +236,7 @@ class TestMagnitudeProperties:
         np.testing.assert_allclose(
             actual_diff,
             np.full_like(actual_diff, expected_diff),
-            rtol=2e-4,  # float32 precision (6-7 significant digits)
+            rtol=1e-10,  # float64 precision
             err_msg="dB scaling property violated",
         )
 
