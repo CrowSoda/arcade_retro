@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "S",    # flake8-bandit (security)
+    "UP",   # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "S101",   # assert usage (needed for tests)
+    "S110",   # try-except-pass (used for best-effort cleanup)
+    "S324",   # MD5 usage (used only for short non-crypto hashes)
+    "S108",   # /tmp usage (platform-specific, Windows already handled)
+    "S603",   # subprocess (controlled inputs)
+    "E402",   # module-level import not at top (needed for path manipulation)
+    "E722",   # bare except (some legacy code)
+    "B023",   # function definition does not bind loop variable (async closure patterns)
+    "B007",   # unused loop variable (warmup loops)
+    "F403",   # star imports (used in hydra config)
+    "F401",   # unused imports (used in try/except import checks)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/generated/*.py" = ["ALL"]  # Ignore generated proto files
+"**/__init__.py" = ["F401"]    # Allow unused imports in __init__.py
+"**/tests/*.py" = ["S108"]     # Allow /tmp in tests
