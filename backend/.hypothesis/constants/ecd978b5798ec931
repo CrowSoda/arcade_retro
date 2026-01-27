@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\inference.py
+# hypothesis_version: 6.151.2
+
+[0.0, 1e-12, 0.1, 0.15, 0.2, 0.3, 0.5, 0.9, 80.0, -100, 100, 128, 512, 1000, 1024, 2048, 4096, '--benchmark', '--benchmark-multi', '--export-trt', '--model', '--num-classes', '.', '.onnx', '.pth', '.trt', 'Benchmark N models', 'CPUExecutionProvider', 'FP16 enabled', 'Model path (.pth)', 'ONNX parse failed', 'PyTorch model loaded', 'TRT build failed', '__main__', 'batch', 'bilinear', 'boxes', 'cpu', 'cuda', 'dets', 'dtype', 'fp16', 'g20.inference', 'images', 'inference', 'labels', 'mem', 'model_ids', 'name', 'num_models', 'onnx', 'parallel_ms', 'pytorch', 'rb', 'resnet18', 'scores', 'sequential_ms', 'shape', 'speedup', 'store_true', 'tensorrt', 'wb']

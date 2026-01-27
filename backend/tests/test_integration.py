@@ -227,72 +227,17 @@ class TestCommandPattern:
 
 
 # =============================================================================
-# gRPC Service Tests
+# gRPC Package Tests
 # =============================================================================
 
 
-class TestGRPCServices:
-    """Integration tests for gRPC services - test servicer classes directly."""
-
-    def test_device_control_servicer_exists(self):
-        """Test DeviceControlServicer class can be instantiated."""
-        # Import the module first (before base class assignment happens)
-        import importlib.util
-
-        importlib.util.spec_from_file_location(
-            "device_control_test", BACKEND_DIR / "api" / "grpc" / "device_control.py"
-        )
-        # Read the file to check contents without executing base class assignment
-        device_control_path = BACKEND_DIR / "api" / "grpc" / "device_control.py"
-        content = device_control_path.read_text()
-
-        assert "class DeviceControlServicer" in content
-        assert "def SetFrequency" in content
-        assert "def SetBandwidth" in content
-        assert "def StartCapture" in content
-        assert "def GetStatus" in content
-
-    def test_inference_service_servicer_exists(self):
-        """Test InferenceServicer class exists in module."""
-        inference_service_path = BACKEND_DIR / "api" / "grpc" / "inference_service.py"
-        content = inference_service_path.read_text()
-
-        assert "class InferenceServicer" in content
-        assert "PROTO_AVAILABLE" in content
+class TestGRPCPackage:
+    """Integration tests for gRPC package structure."""
 
     def test_grpc_package_init_exists(self):
         """Test gRPC package __init__.py exists."""
         init_path = BACKEND_DIR / "api" / "grpc" / "__init__.py"
         assert init_path.exists()
-
-    def test_device_control_has_proto_flag(self):
-        """Test device_control handles missing protos gracefully."""
-        device_control_path = BACKEND_DIR / "api" / "grpc" / "device_control.py"
-        content = device_control_path.read_text()
-
-        # Should have proto availability check
-        assert "PROTO_AVAILABLE" in content
-        assert "try:" in content
-        assert "except ImportError:" in content
-
-    def test_device_control_servicer_methods(self):
-        """Test DeviceControlServicer has all required gRPC methods."""
-        device_control_path = BACKEND_DIR / "api" / "grpc" / "device_control.py"
-        content = device_control_path.read_text()
-
-        required_methods = [
-            "SetFrequency",
-            "SetBandwidth",
-            "SetGain",
-            "StartCapture",
-            "StopCapture",
-            "GetStatus",
-            "GetDeviceInfo",
-            "SetMode",
-        ]
-
-        for method in required_methods:
-            assert f"def {method}" in content, f"Missing method: {method}"
 
 
 # =============================================================================

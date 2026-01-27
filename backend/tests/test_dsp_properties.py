@@ -115,8 +115,8 @@ class TestFFTProperties:
 
     @given(
         complex_samples(min_size=64, max_size=1024),
-        st.floats(min_value=0.5, max_value=10.0),
-        st.floats(min_value=0.5, max_value=10.0),
+        st.floats(min_value=0.5, max_value=5.0),  # Smaller range to avoid precision issues
+        st.floats(min_value=0.5, max_value=5.0),
     )
     @settings(max_examples=50, deadline=None)
     def test_fft_linearity(self, iq_data, scale_a, scale_b):
@@ -127,21 +127,24 @@ class TestFFTProperties:
         """
         assume(len(iq_data) > 0)
 
+        # Convert to float64 for better precision in linearity test
+        iq_data_64 = iq_data.astype(np.complex128)
+
         # Create a second signal (shifted version)
-        y = np.roll(iq_data, len(iq_data) // 4)
+        y = np.roll(iq_data_64, len(iq_data) // 4)
 
         # Combined transform
-        combined = scale_a * iq_data + scale_b * y
+        combined = scale_a * iq_data_64 + scale_b * y
         combined_fft = np.fft.fft(combined)
 
         # Sum of scaled individual transforms
-        sum_fft = scale_a * np.fft.fft(iq_data) + scale_b * np.fft.fft(y)
+        sum_fft = scale_a * np.fft.fft(iq_data_64) + scale_b * np.fft.fft(y)
 
         np.testing.assert_allclose(
             combined_fft,
             sum_fft,
-            rtol=1e-4,
-            atol=5e-6,  # atol for float32 cumulative precision
+            rtol=1e-8,  # Higher precision with float64
+            atol=1e-10,
             err_msg="FFT linearity violated",
         )
 

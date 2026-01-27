@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\generated\control_pb2_grpc.py
+# hypothesis_version: 6.151.2
+
+['1.76.0', 'GetDeviceInfo', 'GetStatus', 'SetBandwidth', 'SetFrequency', 'SetGain', 'SetMode', 'StartCapture', 'StopCapture', 'control_pb2_grpc', 'g20.DeviceControl']

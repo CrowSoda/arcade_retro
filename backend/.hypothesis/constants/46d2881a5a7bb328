@@ -1,0 +1,4 @@
+# file: C:\Users\Crowsoda\CodingProjects\g20_demo\backend\api\ws\handlers\inference.py
+# hypothesis_version: 6.151.2
+
+[0.1, 0.5, 20.0, 825.0, 20000000.0, 200, 1000, 1024, 2048, 4096, '.bin', '.cf32', '.iq', '.pth', '/', 'Invalid JSON', 'No active session', 'backend', 'background', 'bandwidth_mhz', 'boxes', 'center_freq_mhz', 'chunk_ms', 'class_id', 'class_name', 'command', 'confidence', 'creamy_chicken', 'data', 'detection_frame', 'detection_id', 'detections', 'elapsed_seconds', 'error', 'file_path', 'frame_id', 'g20.server', 'infer', 'iq_data', 'labels', 'message', 'model_path', 'models', 'nfft', 'noverlap', 'path', 'rb', 'remote_address', 'run', 'sample_rate', 'score_threshold', 'scores', 'session_id', 'session_started', 'session_stopped', 'start', 'stop', 'timestamp_ms', 'type', 'unknown', 'x1', 'x2', 'y1', 'y2']

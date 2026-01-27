@@ -56,27 +56,6 @@ class SpectrogramDataset(Dataset):
         self.sample_ids = valid_ids
         logger.info(f"SpectrogramDataset: {len(self.sample_ids)} samples from {samples_dir}")
 
-    def _print_debug_sample(self, idx: int):
-        """Print debug info for a sample."""
-        sample_id = self.sample_ids[idx]
-        json_path = self.samples_dir / f"{sample_id}.json"
-        npz_path = self.samples_dir / f"{sample_id}.npz"
-
-        with open(json_path) as f:
-            metadata = json.load(f)
-        with np.load(npz_path) as data:
-            spec = data["spectrogram"]
-
-        logger.debug(f"\n[DEBUG] Sample {sample_id}:")
-        logger.info(f"  Spectrogram shape: {spec.shape}, dtype: {spec.dtype}")
-        logger.info(f"  Spectrogram min/max: {spec.min()}/{spec.max()}")
-        logger.info(f"  Boxes raw: {metadata.get('boxes', [])}")
-        for i, box in enumerate(metadata.get("boxes", [])):
-            x_min, y_min = box["x_min"], box["y_min"]
-            x_max, y_max = box["x_max"], box["y_max"]
-            w, h = x_max - x_min, y_max - y_min
-            logger.info(f"  Box {i}: ({x_min},{y_min}) -> ({x_max},{y_max}), size={w}x{h}")
-
     def __len__(self) -> int:
         return len(self.sample_ids)
 
@@ -234,58 +213,3 @@ def create_data_loaders(
     )
 
     return train_loader, val_loader
-
-
-# =============================================================================
-# Augmentation transforms (optional, for future use)
-# =============================================================================
-
-
-class RandomHorizontalFlip:
-    """Flip spectrogram and boxes horizontally."""
-
-    def __init__(self, p: float = 0.5):
-        self.p = p
-
-    def __call__(self, image: torch.Tensor, target: dict):
-        if torch.rand(1) < self.p:
-            image = torch.flip(image, dims=[2])  # Flip width
-
-            if len(target["boxes"]) > 0:
-                width = image.shape[2]
-                boxes = target["boxes"].clone()
-                boxes[:, [0, 2]] = width - boxes[:, [2, 0]]  # Flip x coords
-                target["boxes"] = boxes
-
-        return image, target
-
-
-class RandomVerticalFlip:
-    """Flip spectrogram and boxes vertically."""
-
-    def __init__(self, p: float = 0.5):
-        self.p = p
-
-    def __call__(self, image: torch.Tensor, target: dict):
-        if torch.rand(1) < self.p:
-            image = torch.flip(image, dims=[1])  # Flip height
-
-            if len(target["boxes"]) > 0:
-                height = image.shape[1]
-                boxes = target["boxes"].clone()
-                boxes[:, [1, 3]] = height - boxes[:, [3, 1]]  # Flip y coords
-                target["boxes"] = boxes
-
-        return image, target
-
-
-class Compose:
-    """Compose multiple transforms."""
-
-    def __init__(self, transforms: list[Callable]):
-        self.transforms = transforms
-
-    def __call__(self, image: torch.Tensor, target: dict):
-        for t in self.transforms:
-            image, target = t(image, target)
-        return image, target
