@@ -47,6 +47,8 @@ jobs:
             --cov-report=xml \
             --cov-report=term-missing \
             --cov-fail-under=25 \
+            --junitxml=junit.xml \
+            -o junit_family=legacy \
             -v --tb=short
 
       - name: Upload coverage to Codecov
@@ -56,6 +58,12 @@ jobs:
           files: backend/coverage.xml
           flags: backend
           fail_ci_if_error: false
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # ==============================================================
   # Flutter Tests (Dart)
