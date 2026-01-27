@@ -76,12 +76,13 @@ data/captures/
 *.rfcap
 
 # Trained Models - distribute via releases (100MB+)
-models/
-models/*.pth
-models/*.pt
-models/*.onnx
-models/*.trt
-models/*.engine
+# ML models directory (at root only)
+/models/
+/models/*.pth
+/models/*.pt
+/models/*.onnx
+/models/*.trt
+/models/*.engine
 
 # ======================
 # LARGE FILES (General)
