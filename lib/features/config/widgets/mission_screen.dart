@@ -413,7 +413,7 @@ class _MissionSummaryCard extends StatelessWidget {
               _SummaryChip(icon: Icons.radio, label: '${mission.centerFreqMhz} MHz'),
               _SummaryChip(icon: Icons.settings_input_antenna, label: 'BW: ${mission.bandwidthMhz} MHz'),
               _SummaryChip(icon: Icons.timer, label: 'Dwell: ${mission.dwellTimeSec}s'),
-              _SummaryChip(icon: Icons.psychology, label: mission.modelName),
+              _SummaryChip(icon: Icons.psychology, label: mission.modelName ?? 'Default'),
               _SummaryChip(icon: Icons.percent, label: '${(mission.confidenceThreshold * 100).round()}%'),
               _SummaryChip(
                 icon: mission.autoRecordDetections ? Icons.fiber_manual_record : Icons.fiber_manual_record_outlined,
