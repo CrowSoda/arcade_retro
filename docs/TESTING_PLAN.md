@@ -1,9 +1,25 @@
 # G20 Testing Plan - Path to 90% Coverage
 
 ## Current State
-- **Overall**: 19.49% (2869 of 14717 lines covered)
-- **Backend (Python)**: 29.54% (2143 of 7255 lines)
-- **Flutter (Dart)**: 9.73% (726 of 7462 lines)
+- **Overall**: ~35% (was 19.49%)
+- **Backend (Python)**: 42% (3450 of 8192 lines covered) - was 29.54%
+- **Flutter (Dart)**: 9.73% (726 of 7462 lines) - unchanged
+
+### Recent Progress (Jan 2026)
+| Module | Before | After | Change |
+|--------|--------|-------|--------|
+| colormaps.py | 0% | 100% | +43 lines |
+| logger_config.py | 67% | 89% | +24 lines |
+| dsp/subband_extractor.py | 16% | 59% | +117 lines |
+| hydra/detector.py | 19% | 58% | +89 lines |
+| training/dataset.py | 18% | 86% | +91 lines |
+| **TOTAL** | 30% | 42% | +12% |
+
+New test files added:
+- `test_quick_wins.py` - colormaps, logger, runtime tests
+- `test_dsp_extended.py` - SubbandExtractor, header I/O tests
+- `test_hydra_extended.py` - HydraDetector, registry, config tests
+- `test_training_extended.py` - SpectrogramDataset, transforms, data loaders
 
 ## Target: 90% Coverage
 - Backend: 6530 lines covered (currently 2143 → need +4387 lines)

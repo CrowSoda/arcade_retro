@@ -22,11 +22,11 @@ dependencies:
   # Charts & Visualization
   fl_chart: ^0.66.0
 
-  # Maps - Flutter Map with Vector Tiles + PMTiles (supports Windows)
-  flutter_map: ^7.0.0
-  vector_map_tiles: ^8.0.0
-  vector_map_tiles_pmtiles: ^1.5.0
-  latlong2: ^0.9.0
+  # Maps - Premium feature (commented out for base build)
+  # flutter_map: ^7.0.0
+  # vector_map_tiles: ^8.0.0
+  # vector_map_tiles_pmtiles: ^1.5.0
+  latlong2: ^0.9.0  # Keep for map_provider.dart LatLng type
 
   # DSP / FFT
   fftea: ^1.0.0

@@ -1,0 +1,7 @@
+{
+  "ws_port": 52196,
+  "grpc_port": 50051,
+  "pid": 36660,
+  "started_at": "2026-01-28T12:59:53.775638Z",
+  "ready": true
+}

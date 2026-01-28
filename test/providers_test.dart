@@ -1,6 +1,8 @@
 // Flutter provider and utility tests
 // Tests for state management and business logic
 
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -200,49 +202,13 @@ double _pixelToFreq(double pixel, double centerFreqMHz, double bandwidthMHz, int
 }
 
 double _linearToDb(double linear) {
-  return 20 * _log10(linear);
+  // dB = 20 * log10(linear)
+  return 20 * (math.log(linear) / math.ln10);
 }
 
 double _dbToLinear(double db) {
-  return _pow10(db / 20);
-}
-
-double _log10(double x) {
-  return _ln(x) / _ln(10);
-}
-
-double _ln(double x) {
-  // Natural log approximation for dart:math-free environment
-  // In real code, use: import 'dart:math'; log(x)
-  if (x <= 0) return double.negativeInfinity;
-  if (x == 1) return 0;
-
-  // Newton-Raphson for ln(x)
-  double y = x - 1;
-  double result = y;
-  double term = y;
-  for (int i = 2; i <= 50; i++) {
-    term *= -y;
-    result += term / i;
-  }
-  return result;
-}
-
-double _pow10(double x) {
-  // 10^x approximation
-  // In real code, use: import 'dart:math'; pow(10, x)
-  return _exp(x * _ln(10));
-}
-
-double _exp(double x) {
-  // e^x Taylor series
-  double result = 1;
-  double term = 1;
-  for (int i = 1; i <= 50; i++) {
-    term *= x / i;
-    result += term;
-  }
-  return result;
+  // linear = 10^(dB/20)
+  return math.pow(10, db / 20).toDouble();
 }
 
 double _normalize(double value, double min, double max) {
