@@ -2,12 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/theme.dart';
 
-/// Map display placeholder - Premium feature requires license
-///
-/// Contact vendor for map visualization capabilities:
-/// - Real-time detection geolocation
-/// - Interactive filtering by SOI
-/// - Offline PMTiles support
+/// Map display placeholder - Feature in development
 class MapDisplay extends ConsumerWidget {
   const MapDisplay({super.key});
 
@@ -35,7 +30,7 @@ class MapDisplay extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Feature not included in this build',
+              'Not yet implemented',
               style: TextStyle(
                 fontSize: 14,
                 color: G20Colors.textSecondaryDark.withOpacity(0.6),
