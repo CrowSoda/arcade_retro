@@ -1,0 +1,462 @@
+{
+  "sensitivity": "medium",
+  "iou_threshold": 0.3,
+  "samples_tested": 48,
+  "total_ground_truth": 48,
+  "total_detected": 2605,
+  "total_matched": 9,
+  "total_missed": 39,
+  "overall_recall": 0.1875,
+  "false_positives": 2596,
+  "shape_analysis": {
+    "count": 48,
+    "avg_width": 45.333333333333336,
+    "avg_height": 15.4375,
+    "min_width": 28,
+    "max_width": 147,
+    "min_height": 11,
+    "max_height": 22,
+    "avg_aspect_ratio": 3.034273964500842,
+    "min_aspect_ratio": 1.55,
+    "max_aspect_ratio": 8.647058823529411,
+    "suggested_crop_size": [
+      32,
+      64
+    ]
+  },
+  "sample_results": [
+    {
+      "file": "03af8a96296ad1f4",
+      "gt_count": 1,
+      "pred_count": 53,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 53
+    },
+    {
+      "file": "17f38f7022990730",
+      "gt_count": 1,
+      "pred_count": 27,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 27
+    },
+    {
+      "file": "1b92032e916f9a11",
+      "gt_count": 1,
+      "pred_count": 57,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 57
+    },
+    {
+      "file": "20b03a39ec31f640",
+      "gt_count": 1,
+      "pred_count": 65,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 65
+    },
+    {
+      "file": "27eb191e66e5f22e",
+      "gt_count": 1,
+      "pred_count": 30,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 29
+    },
+    {
+      "file": "2d7e642ad84ea396",
+      "gt_count": 1,
+      "pred_count": 68,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 67
+    },
+    {
+      "file": "30c49ff6a4580a7e",
+      "gt_count": 1,
+      "pred_count": 47,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 47
+    },
+    {
+      "file": "3425797c19ef25d7",
+      "gt_count": 1,
+      "pred_count": 66,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 66
+    },
+    {
+      "file": "34ea96532f14c6fc",
+      "gt_count": 1,
+      "pred_count": 31,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 31
+    },
+    {
+      "file": "35c28825f481eb5b",
+      "gt_count": 1,
+      "pred_count": 67,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 67
+    },
+    {
+      "file": "41e91bc47c50a256",
+      "gt_count": 1,
+      "pred_count": 55,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 55
+    },
+    {
+      "file": "478299889692a167",
+      "gt_count": 1,
+      "pred_count": 56,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 55
+    },
+    {
+      "file": "4bb1ceaf66b6a606",
+      "gt_count": 1,
+      "pred_count": 66,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 66
+    },
+    {
+      "file": "4dcf6bbfcd679b07",
+      "gt_count": 1,
+      "pred_count": 65,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 64
+    },
+    {
+      "file": "4e1eeb4c867aadae",
+      "gt_count": 1,
+      "pred_count": 63,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 62
+    },
+    {
+      "file": "5250cde1d97cfaa2",
+      "gt_count": 1,
+      "pred_count": 53,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 53
+    },
+    {
+      "file": "5b86827cf3066915",
+      "gt_count": 1,
+      "pred_count": 66,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 66
+    },
+    {
+      "file": "5d454efba6c088b6",
+      "gt_count": 1,
+      "pred_count": 72,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 72
+    },
+    {
+      "file": "5d52cad53959e565",
+      "gt_count": 1,
+      "pred_count": 58,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 58
+    },
+    {
+      "file": "5f427d2fee6c2d2b",
+      "gt_count": 1,
+      "pred_count": 68,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 68
+    },
+    {
+      "file": "61269bf501591281",
+      "gt_count": 1,
+      "pred_count": 63,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 63
+    },
+    {
+      "file": "6210c301374c1c8e",
+      "gt_count": 1,
+      "pred_count": 71,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 71
+    },
+    {
+      "file": "6529c0241a5759f1",
+      "gt_count": 1,
+      "pred_count": 59,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 59
+    },
+    {
+      "file": "6af44029b939ef34",
+      "gt_count": 1,
+      "pred_count": 22,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 22
+    },
+    {
+      "file": "717755d1a08037de",
+      "gt_count": 1,
+      "pred_count": 33,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 33
+    },
+    {
+      "file": "748b5698ced0eada",
+      "gt_count": 1,
+      "pred_count": 50,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 50
+    },
+    {
+      "file": "75b469837696c0d5",
+      "gt_count": 1,
+      "pred_count": 54,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 54
+    },
+    {
+      "file": "7bbe755a3e23d370",
+      "gt_count": 1,
+      "pred_count": 77,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 77
+    },
+    {
+      "file": "8401c45a15fef61a",
+      "gt_count": 1,
+      "pred_count": 30,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 29
+    },
+    {
+      "file": "8e51a7505e293096",
+      "gt_count": 1,
+      "pred_count": 18,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 18
+    },
+    {
+      "file": "9485f067da4faa28",
+      "gt_count": 1,
+      "pred_count": 64,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 64
+    },
+    {
+      "file": "9b528b2ac8da0c95",
+      "gt_count": 1,
+      "pred_count": 67,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 67
+    },
+    {
+      "file": "9feccae95e6f8474",
+      "gt_count": 1,
+      "pred_count": 64,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 64
+    },
+    {
+      "file": "accffea27b5082a1",
+      "gt_count": 1,
+      "pred_count": 66,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 66
+    },
+    {
+      "file": "af33d9a2a1395d0d",
+      "gt_count": 1,
+      "pred_count": 40,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 40
+    },
+    {
+      "file": "bc6d54bbbf524831",
+      "gt_count": 1,
+      "pred_count": 71,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 71
+    },
+    {
+      "file": "bef6f4dcec5b3426",
+      "gt_count": 1,
+      "pred_count": 71,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 71
+    },
+    {
+      "file": "c05e1ef8bd2fbe70",
+      "gt_count": 1,
+      "pred_count": 33,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 33
+    },
+    {
+      "file": "cddcd453ff8fea6a",
+      "gt_count": 1,
+      "pred_count": 35,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 34
+    },
+    {
+      "file": "ce515e3b17c6bde5",
+      "gt_count": 1,
+      "pred_count": 30,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 30
+    },
+    {
+      "file": "da1979bf1a623a94",
+      "gt_count": 1,
+      "pred_count": 28,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 28
+    },
+    {
+      "file": "dcbf4609115a978f",
+      "gt_count": 1,
+      "pred_count": 64,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 64
+    },
+    {
+      "file": "e2f6143dd7002038",
+      "gt_count": 1,
+      "pred_count": 68,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 67
+    },
+    {
+      "file": "eb913585d22819aa",
+      "gt_count": 1,
+      "pred_count": 72,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 72
+    },
+    {
+      "file": "ec0eac141c0073ac",
+      "gt_count": 1,
+      "pred_count": 31,
+      "matched": 1,
+      "missed": 0,
+      "recall": 1.0,
+      "false_positives": 30
+    },
+    {
+      "file": "ef930dac9bc48cb8",
+      "gt_count": 1,
+      "pred_count": 68,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 68
+    },
+    {
+      "file": "f50654a6d3cf359a",
+      "gt_count": 1,
+      "pred_count": 64,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 64
+    },
+    {
+      "file": "f681fcf75a046257",
+      "gt_count": 1,
+      "pred_count": 59,
+      "matched": 0,
+      "missed": 1,
+      "recall": 0.0,
+      "false_positives": 59
+    }
+  ],
+  "verdict": "FAIL"
+}

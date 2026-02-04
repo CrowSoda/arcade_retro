@@ -37,11 +37,18 @@ class _AppShellState extends ConsumerState<AppShell> {
         // Capture started - update RX-2 to manual mode with capture frequency
         final freqMHz = double.tryParse(next.targetFreqMHz ?? '825.0') ?? 825.0;
         multiRxNotifier.tuneRx2(freqMHz, 5.0, null);  // 5 MHz BW, no timeout
-        debugPrint('[RX] RX-2 tuned to $freqMHz MHz for capture');
+        // Set isRecording flag - this makes RX2 show "REC" instead of "MAN"
+        multiRxNotifier.updateRx(2, (ch) => ch.copyWith(isRecording: true));
+        debugPrint('[RX] RX-2 tuned to $freqMHz MHz for capture - RECORDING');
       } else if (next.phase == CapturePhase.idle && prev?.phase != CapturePhase.idle) {
-        // Capture complete - return RX-2 to idle
+        // Capture complete - return RX-2 to idle and clear recording flag
+        multiRxNotifier.updateRx(2, (ch) => ch.copyWith(isRecording: false));
         multiRxNotifier.rx2ResumeIdle();
-        debugPrint('[RX] RX-2 returned to idle');
+        debugPrint('[RX] RX-2 returned to idle - STOPPED RECORDING');
+      } else if (next.phase == CapturePhase.complete && prev?.phase != CapturePhase.complete) {
+        // Capture finished but may have more in queue - clear recording flag
+        multiRxNotifier.updateRx(2, (ch) => ch.copyWith(isRecording: false));
+        debugPrint('[RX] RX-2 capture complete');
       }
     });
 

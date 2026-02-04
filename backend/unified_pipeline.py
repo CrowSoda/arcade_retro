@@ -336,7 +336,7 @@ COLORMAP_NAMES = ["viridis", "plasma", "inferno", "magma", "turbo"]
 # =============================================================================
 DEBUG_DIR = Path("/tmp/fft_debug") if sys.platform != "win32" else BASE_DIR / "fft_debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-DEBUG_ENABLED = False  # Set to True to save PNG captures to fft_debug/
+DEBUG_ENABLED = True  # Set to True to save PNG captures to fft_debug/
 
 
 def capture_detection(

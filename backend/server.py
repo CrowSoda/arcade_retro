@@ -33,13 +33,15 @@ from core import shutdown as core_shutdown
 from core.models import CaptureSession, ChannelState, InferenceSession, ModelState
 from core.process import start_parent_watchdog
 
-# Import enhanced logger
-from logger_config import get_logger
-from runtime_info import clear_server_info, write_server_info
-
 # Import extracted API modules (strangler fig pattern)
 # NOTE: gRPC servicers still defined locally due to proto inheritance complexity
 # The extracted versions are available at api.grpc.device_control and api.grpc.inference_service
+# Import crop classifier API
+from crop_classifier.api import handle_crop_command
+
+# Import enhanced logger
+from logger_config import get_logger
+from runtime_info import clear_server_info, write_server_info
 
 # Module logger
 logger_server = get_logger("server")
@@ -1475,6 +1477,19 @@ async def _ws_training_handler_impl(websocket):
                     notes = data.get("notes")
                     is_new = data.get("is_new", False)
 
+                    # Extract training config - ALL values from Flutter presets
+                    training_config = data.get("training_config", {})
+                    epochs = training_config.get("epochs", 30)
+                    learning_rate = training_config.get("learning_rate", 0.001)
+                    batch_size = training_config.get("batch_size", 4)
+                    early_stop_patience = training_config.get("early_stop_patience", 5)
+                    warmup_iterations = training_config.get("warmup_iterations", 1000)
+
+                    logger_server.info(
+                        f"Training: Received config: epochs={epochs}, lr={learning_rate}, "
+                        f"batch={batch_size}, patience={early_stop_patience}, warmup={warmup_iterations}"
+                    )
+
                     if not signal_name:
                         await websocket.send(
                             json.dumps({"type": "error", "message": "signal_name required"})
@@ -1498,18 +1513,32 @@ async def _ws_training_handler_impl(websocket):
                         )
                         continue
 
-                    # Run training in background
+                    # Run training in background with ALL config values
                     async def run_training():
                         try:
                             callback = make_progress_callback(websocket)
 
                             if is_new:
                                 result = training_service.train_new_signal(
-                                    signal_name, notes=notes, callback=callback
+                                    signal_name,
+                                    epochs=epochs,
+                                    learning_rate=learning_rate,
+                                    batch_size=batch_size,
+                                    early_stop_patience=early_stop_patience,
+                                    warmup_iterations=warmup_iterations,
+                                    notes=notes,
+                                    callback=callback,
                                 )
                             else:
                                 result = training_service.extend_signal(
-                                    signal_name, notes=notes, callback=callback
+                                    signal_name,
+                                    epochs=epochs,
+                                    learning_rate=learning_rate,
+                                    batch_size=batch_size,
+                                    early_stop_patience=early_stop_patience,
+                                    warmup_iterations=warmup_iterations,
+                                    notes=notes,
+                                    callback=callback,
                                 )
 
                             await websocket.send(
@@ -1870,7 +1899,25 @@ async def ws_router(websocket):
         ws_path = "/"
 
     try:
-        if "/training" in ws_path:
+        if "/crop" in ws_path:
+            logger_server.info("Router: Routing to crop classifier handler")
+            # Handle crop classifier commands via JSON message loop
+            import json
+
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    cmd = data.get("command", "")
+
+                    async def send_response(resp):
+                        await websocket.send(json.dumps(resp))
+
+                    await handle_crop_command(cmd, data, send_response)
+                except json.JSONDecodeError:
+                    await websocket.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                except Exception as e:
+                    await websocket.send(json.dumps({"type": "error", "message": str(e)}))
+        elif "/training" in ws_path:
             logger_server.info("Router: Routing to ws_training_handler (Hydra training/versioning)")
             await ws_training_handler(websocket)
         elif "/video" in ws_path:

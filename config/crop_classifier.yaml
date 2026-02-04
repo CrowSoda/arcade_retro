@@ -1,0 +1,210 @@
+# Crop Classifier Configuration
+#
+# This file contains all configuration for the two-stage detection pipeline.
+# Values were tuned and validated on the Creamy_Shrimp dataset.
+#
+# WARNING: Blob detection parameters are LOCKED.
+# If you modify them, re-run validation:
+#   python scripts/test_blob_recall.py --samples-dir ... --sensitivity high
+
+# =============================================================================
+# PREPROCESSING
+# =============================================================================
+preprocessing:
+  # Target crop size (height, width) - wider than tall for RF signals
+  # Chosen based on signal shape analysis: most signals are 2-15x wider than tall
+  target_height: 32
+  target_width: 64
+
+  # Padding around detected bounding boxes (fraction of box size)
+  # 15% provides context around signal edges for classification
+  padding_pct: 0.15
+
+  # Normalization mode: 'per_crop', 'global', or 'none'
+  # per_crop: Each crop normalized to mean=0, std=1
+  # global: Use dataset-level statistics (requires calibration)
+  # none: No normalization (not recommended)
+  normalization: per_crop
+
+  # Minimum crop dimension before resize (pixels)
+  # Crops smaller than this are treated as noise
+  min_crop_size: 4
+
+# =============================================================================
+# BLOB DETECTION - LOCKED CONFIG
+# =============================================================================
+# Validated at 91.7% recall on Creamy_Shrimp (48 samples)
+# Do NOT change without re-running validation
+blob_detection:
+  # Adaptive threshold parameters
+  block_size: 51       # Local neighborhood size (must be odd)
+  C: -5                # Constant subtracted from mean (negative = detect bright)
+
+  # Area filtering (in pixels)
+  min_area: 50         # Minimum blob area
+  max_area: 5000       # Maximum blob area
+
+  # Aspect ratio filtering (width / height)
+  min_aspect_ratio: 1.5    # Filter near-square blobs (noise)
+  max_aspect_ratio: 15.0   # Allow very wide signals
+
+  # Morphological cleanup
+  morph_kernel_size: 3     # Closing kernel size
+  morph_iterations: 1      # Number of closing iterations
+
+# =============================================================================
+# MODEL ARCHITECTURE
+# =============================================================================
+model:
+  # Model type: 'siamese' (25-100 labels) or 'classifier' (100+ labels)
+  type: siamese
+
+  # Embedding dimension for Siamese network
+  embedding_dim: 64
+
+  # Dropout rate (regularization for small datasets)
+  dropout: 0.3
+
+  # Input channels (1 for grayscale spectrograms)
+  input_channels: 1
+
+# =============================================================================
+# TRAINING - PHASE 1 (SIAMESE)
+# =============================================================================
+training:
+  phase1:
+    # Siamese network training for 25-100 labels
+    epochs: 50
+    learning_rate: 0.001
+    batch_size: 16
+    margin: 1.0              # Contrastive loss margin
+
+    # Early stopping
+    early_stop_patience: 10
+
+    # Gradient clipping
+    max_grad_norm: 1.0
+
+    # Optimizer
+    optimizer: adam
+    weight_decay: 0.0001
+
+  phase2:
+    # Direct CNN classifier for 100+ labels
+    epochs: 75
+    learning_rate: 0.001
+    batch_size: 8
+    early_stop_patience: 15
+    weight_decay: 0.0001
+
+    # Focal loss parameters
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+
+# =============================================================================
+# AUGMENTATION
+# =============================================================================
+augmentation:
+  # Enable augmentation during training
+  enabled: true
+
+  # Probability of each augmentation
+  p_freq_shift: 0.5       # Shift signal in frequency axis
+  p_time_shift: 0.5       # Shift signal in time axis
+  p_power_scale: 0.5      # Scale signal power
+  p_noise: 0.7            # Add Gaussian noise
+  p_freq_mask: 0.3        # SpecAugment frequency masking
+  p_time_mask: 0.3        # SpecAugment time masking
+
+  # Augmentation parameters
+  freq_shift_max: 0.1     # Max shift as fraction of width
+  time_shift_max: 0.1     # Max shift as fraction of height
+  power_scale_range: [0.8, 1.2]  # Power scaling range
+  noise_std_range: [0.01, 0.1]   # Noise standard deviation range
+  mask_max_width: 0.2     # Max mask width as fraction
+
+# =============================================================================
+# ACTIVE LEARNING
+# =============================================================================
+active_learning:
+  # Samples per labeling batch
+  batch_size: 5
+
+  # Diversity weight in hybrid query strategy
+  # Higher = more diverse samples, lower = more uncertain samples
+  diversity_beta: 3
+
+  # Pseudo-labeling confidence threshold
+  pseudo_label_threshold: 0.9
+  pseudo_label_min_threshold: 0.7    # Decays to this over training
+
+  # Maximum unlabeled pool size to consider
+  max_pool_size: 10000
+
+# =============================================================================
+# LABELING UI THRESHOLDS
+# =============================================================================
+labeling:
+  # Auto-accept threshold (above this = automatic signal)
+  auto_accept_threshold: 0.8
+
+  # Auto-reject threshold (below this = automatic noise)
+  auto_reject_threshold: 0.2
+
+  # User only reviews crops between these thresholds
+  # This focuses manual effort on uncertain cases
+
+  # Show summary bar in UI
+  show_summary: true
+
+# =============================================================================
+# INFERENCE
+# =============================================================================
+inference:
+  # Classification threshold
+  score_threshold: 0.5
+
+  # Non-maximum suppression IoU threshold
+  nms_threshold: 0.5
+
+  # Maximum detections per frame
+  max_detections: 100
+
+  # Device for inference
+  device: cuda    # 'cuda' or 'cpu'
+
+  # Batch size for crop classification
+  batch_size: 32
+
+# =============================================================================
+# PATHS
+# =============================================================================
+paths:
+  # Model weights directory
+  models_dir: models/crop_classifier
+
+  # Siamese model weights
+  siamese_weights: models/crop_classifier/siamese.pth
+
+  # Classifier model weights
+  classifier_weights: models/crop_classifier/classifier.pth
+
+  # Gallery embeddings for Siamese inference
+  gallery_path: models/crop_classifier/gallery.pt
+
+  # Labels storage
+  labels_dir: training_data/crop_labels
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+logging:
+  # Log training metrics every N batches
+  log_interval: 10
+
+  # Save checkpoints every N epochs
+  checkpoint_interval: 5
+
+  # TensorBoard logging
+  tensorboard: true
+  tensorboard_dir: logs/crop_classifier

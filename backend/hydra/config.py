@@ -30,11 +30,18 @@ class TrainingPreset(Enum):
     FAST = "fast"
     BALANCED = "balanced"
     QUALITY = "quality"
+    EXTREME = "extreme"  # Maximum epochs for difficult signals
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """Immutable training configuration."""
+    """Immutable training configuration.
+
+    Research basis:
+    - TFA (ICML 2020): Frozen backbone fine-tuning
+    - DeFRCN (ICCV 2021): Gradient decoupling
+    - Few-shot warmup: 1000-2000 iterations for stability
+    """
 
     epochs: int
     early_stop_patience: int
@@ -42,6 +49,7 @@ class TrainingConfig:
     batch_size: int
     val_ratio: float
     min_samples: int
+    warmup_iterations: int  # Research: critical for few-shot stability (1000-2000)
     description: str
     emoji: str
 
@@ -49,14 +57,15 @@ class TrainingConfig:
 TRAINING_PRESETS: dict[TrainingPreset, TrainingConfig] = {
     # ⚡ FAST: Quick validation, check if labels work
     # Research basis: Foundation Models paper uses 3 epochs with frozen backbone
-    # Higher LR (0.005) for faster convergence per Expandable-RCNN
+    # LR 0.001 (research standard for few-shot) - changed from 0.005
     TrainingPreset.FAST: TrainingConfig(
         epochs=15,
         early_stop_patience=2,  # TFA implementation uses patience=2
-        learning_rate=0.005,  # Higher LR = faster convergence
+        learning_rate=0.001,  # Research: 0.001 for few-shot fine-tuning
         batch_size=8,  # Larger batch = fewer steps
         val_ratio=0.2,
         min_samples=5,
+        warmup_iterations=500,  # Short warmup for fast preset
         description="Quick validation (~1-2 min)",
         emoji="⚡",
     ),
@@ -70,21 +79,37 @@ TRAINING_PRESETS: dict[TrainingPreset, TrainingConfig] = {
         batch_size=4,  # Balance noise vs stability
         val_ratio=0.2,
         min_samples=5,
+        warmup_iterations=1000,  # Research: 1000-2000 for few-shot
         description="Production default (~3-5 min)",
         emoji="⚖️",
     ),
     # 🎯 QUALITY: Maximum accuracy
     # Research basis: Intel research shows small batches → flat minima → better generalization
-    # Lower LR (0.0005) for finer convergence per Foundation Models paper
+    # LR 0.001 (research standard) with longer warmup
     TrainingPreset.QUALITY: TrainingConfig(
         epochs=75,
         early_stop_patience=10,
-        learning_rate=0.0005,  # Lower LR = finer convergence
-        batch_size=2,  # Smaller batch = more noise = less overfitting
+        learning_rate=0.001,  # Research: consistent 0.001 for few-shot
+        batch_size=4,  # Research: 4-8 for regularization benefit
         val_ratio=0.2,
         min_samples=10,  # Require more data for quality
+        warmup_iterations=1500,  # Longer warmup for quality
         description="Maximum accuracy (~10-15 min)",
         emoji="🎯",
+    ),
+    # 🔥 EXTREME: For difficult signals requiring extensive training
+    # Research basis: When quality preset F1 plateaus, more epochs with very low LR
+    # can help escape local minima and find better solutions
+    TrainingPreset.EXTREME: TrainingConfig(
+        epochs=150,
+        early_stop_patience=20,  # Very patient - let it converge fully
+        learning_rate=0.0005,  # Slightly lower for extended training
+        batch_size=2,  # Small batch for regularization
+        val_ratio=0.2,
+        min_samples=15,  # Need good data diversity for long training
+        warmup_iterations=2000,  # Full warmup for extreme
+        description="Extended training (~25-40 min)",
+        emoji="🔥",
     ),
 }
 
@@ -100,7 +125,7 @@ def get_preset_by_name(name: str) -> TrainingPreset:
     for preset in TrainingPreset:
         if preset.value == name_lower:
             return preset
-    raise ValueError(f"Unknown preset: {name}. Valid options: fast, balanced, quality")
+    raise ValueError(f"Unknown preset: {name}. Valid options: fast, balanced, quality, extreme")
 
 
 # =============================================================================

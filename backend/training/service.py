@@ -104,7 +104,11 @@ class TrainingService:
     def train_new_signal(
         self,
         signal_name: str,
-        preset: str = "balanced",
+        epochs: int = 30,
+        learning_rate: float = 0.001,
+        batch_size: int = 4,
+        early_stop_patience: int = 5,
+        warmup_iterations: int = 1000,
         notes: str = None,
         callback: Callable[[TrainingProgress], None] = None,
     ) -> TrainingResult:
@@ -112,12 +116,26 @@ class TrainingService:
 
         Args:
             signal_name: Name of the signal class
-            preset: Training preset - "fast", "balanced", or "quality"
+            epochs: Number of training epochs
+            learning_rate: Learning rate (research: 0.001 for few-shot)
+            batch_size: Batch size (research: 4-8 for regularization)
+            early_stop_patience: Patience for early stopping
+            warmup_iterations: Warmup iterations (research: 1000-2000)
             notes: Optional training notes
             callback: Progress callback function
         """
-        # Get config for preset
-        config = get_training_config(get_preset_by_name(preset))
+        # Build config from explicit values (no preset lookup!)
+        config = TrainingConfig(
+            epochs=epochs,
+            early_stop_patience=early_stop_patience,
+            learning_rate=learning_rate,
+            batch_size=batch_size,
+            val_ratio=0.2,  # Standard 80/20 split
+            min_samples=5,  # Minimum for few-shot
+            warmup_iterations=warmup_iterations,
+            description="Custom config",
+            emoji="🔧",
+        )
 
         # Create initial split
         self.split_manager.create_initial_split(signal_name)
@@ -127,7 +145,11 @@ class TrainingService:
     def extend_signal(
         self,
         signal_name: str,
-        preset: str = "balanced",
+        epochs: int = 30,
+        learning_rate: float = 0.001,
+        batch_size: int = 4,
+        early_stop_patience: int = 5,
+        warmup_iterations: int = 1000,
         notes: str = None,
         callback: Callable[[TrainingProgress], None] = None,
     ) -> TrainingResult:
@@ -135,12 +157,26 @@ class TrainingService:
 
         Args:
             signal_name: Name of the signal class
-            preset: Training preset - "fast", "balanced", or "quality"
+            epochs: Number of training epochs
+            learning_rate: Learning rate (research: 0.001 for few-shot)
+            batch_size: Batch size (research: 4-8 for regularization)
+            early_stop_patience: Patience for early stopping
+            warmup_iterations: Warmup iterations (research: 1000-2000)
             notes: Optional training notes
             callback: Progress callback function
         """
-        # Get config for preset
-        config = get_training_config(get_preset_by_name(preset))
+        # Build config from explicit values (no preset lookup!)
+        config = TrainingConfig(
+            epochs=epochs,
+            early_stop_patience=early_stop_patience,
+            learning_rate=learning_rate,
+            batch_size=batch_size,
+            val_ratio=0.2,  # Standard 80/20 split
+            min_samples=5,  # Minimum for few-shot
+            warmup_iterations=warmup_iterations,
+            description="Custom config",
+            emoji="🔧",
+        )
 
         # Extend split with new samples
         self.split_manager.extend_split(signal_name)
@@ -184,8 +220,8 @@ class TrainingService:
         )
 
         try:
-            # Build model with frozen backbone
-            model = self._build_model()
+            # Build model with frozen backbone and dynamic anchors
+            model = self._build_model(signal_name=signal_name)
 
             # Load existing head weights if extending
             if not is_new:
@@ -262,13 +298,21 @@ class TrainingService:
             self._is_training = False
             self._current_signal = None
 
-    def _build_model(self) -> FasterRCNN:
-        """Build FasterRCNN with frozen backbone and custom anchors for signal detection.
+    def _build_model(self, signal_name: str = None) -> FasterRCNN:
+        """Build FasterRCNN with frozen backbone and DYNAMIC anchors.
 
-        Signal boxes are typically ~12px wide × ~84px tall (aspect ratio ~0.15).
-        Default Faster R-CNN anchors (32-512px, aspects 0.5-2.0) are too big.
-        Custom anchors: smaller sizes (8-128px) + narrow aspects (0.1-0.3).
+        If signal_name provided, computes optimal anchors from that signal's boxes
+        using IoU-based k-means. Otherwise uses default wide-coverage anchors.
+
+        This solves the anchor mismatch problem where signals with unusual
+        aspect ratios (very wide or very tall) had no matching anchors.
         """
+        from .anchors import (
+            anchors_to_generator_format,
+            compute_anchor_coverage,
+            compute_anchors_kmeans_iou,
+            load_all_boxes_for_signal,
+        )
 
         # Load backbone weights
         backbone_path = self.models_dir / "backbone" / "active.pth"
@@ -278,23 +322,50 @@ class TrainingService:
         logger.debug(f"\n[DEBUG] Loading backbone from: {backbone_path}")
         backbone_state = torch.load(backbone_path, map_location=self.device, weights_only=False)
         logger.debug(f"[DEBUG] Backbone state keys: {len(backbone_state)} keys")
-        print(f"[DEBUG] First 5 keys: {list(backbone_state.keys())[:5]}")
+        logger.debug(f"[DEBUG] First 5 keys: {list(backbone_state.keys())[:5]}")
 
         # Create backbone
         backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
 
-        # Custom anchor generator for narrow signal boxes (~12x84 pixels, aspect ~0.15)
-        # Sizes cover the range: min box ~4x65, max box ~58x171
-        # Aspect ratios: 0.1, 0.15, 0.2, 0.3 for narrow vertical signals
-        # IMPORTANT: FPN has 5 feature levels, so we need 5 tuples (one per level)
-        anchor_generator = AnchorGenerator(
-            sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
-            aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5,  # Same aspects for all 5 FPN levels
-        )
+        # DYNAMIC ANCHORS: Compute from user's labeled boxes
+        anchor_wh = None
+        if signal_name:
+            boxes = load_all_boxes_for_signal(str(self.training_data_dir), signal_name)
+            if len(boxes) >= 9:
+                # Enough boxes for k-means
+                anchor_wh = compute_anchors_kmeans_iou(boxes, num_anchors=9)
+                sizes, aspects = anchors_to_generator_format(anchor_wh)
 
-        logger.debug("[DEBUG] Custom anchor generator:")
-        logger.info(f"  sizes: {anchor_generator.sizes}")
-        logger.info(f"  aspect_ratios: {anchor_generator.aspect_ratios}")
+                # Log coverage improvement
+                coverage = compute_anchor_coverage(boxes, anchor_wh)
+                logger.info(
+                    f"[Anchors] Dynamic anchors coverage: {coverage['coverage_pct_0.5']:.1f}% at IoU>0.5"
+                )
+                logger.info("[Anchors] (was ~72% with fixed anchors)")
+            else:
+                # Fall back to wide-coverage defaults
+                from .anchors import get_default_anchors
+
+                anchor_wh = get_default_anchors()
+                sizes, aspects = anchors_to_generator_format(anchor_wh)
+                logger.info(
+                    f"[Anchors] Using default wide-coverage anchors ({len(boxes)} samples < 9)"
+                )
+        else:
+            # Default wide-coverage anchors
+            from .anchors import get_default_anchors
+
+            anchor_wh = get_default_anchors()
+            sizes, aspects = anchors_to_generator_format(anchor_wh)
+            logger.info("[Anchors] Using default wide-coverage anchors (no signal specified)")
+
+        # Store anchor config for later saving to metadata
+        self._current_anchor_wh = anchor_wh
+
+        anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=aspects)
+
+        logger.info(f"[Anchors] sizes: {sizes[0]}")
+        logger.info(f"[Anchors] aspects: {aspects[0]}")
 
         # Create model with custom anchors
         model = FasterRCNN(
@@ -314,19 +385,25 @@ class TrainingService:
         if missing:
             logger.debug(f"[DEBUG] First 5 missing: {missing[:5]}")
 
-        # UNFREEZE BACKBONE - train everything (FULL END-TO-END)
+        # FREEZE BACKBONE - TFA/DeFRCN research: only train head for few-shot
+        # This is CRITICAL for few-shot learning - backbone features transfer naturally
+        # to novel classes, only the classification head needs adaptation
         trainable_count = 0
-        backbone_trainable = 0
+        backbone_frozen = 0
+        head_trainable = 0
         for name, param in model.named_parameters():
-            param.requires_grad = True
-            trainable_count += 1
             if name.startswith("backbone."):
-                backbone_trainable += 1
+                param.requires_grad = False  # FREEZE backbone
+                backbone_frozen += 1
+            else:
+                param.requires_grad = True  # Train RPN + head
+                head_trainable += 1
+            trainable_count += 1
 
-        logger.debug("[DEBUG] ******* FULL END-TO-END TRAINING *******")
-        logger.debug(f"[DEBUG] Total trainable params: {trainable_count}")
-        logger.debug(f"[DEBUG] Backbone trainable params: {backbone_trainable} (UNFROZEN!)")
-        logger.debug("[DEBUG] If backbone_trainable > 0, backbone IS training!")
+        logger.info("[Training] ******* FROZEN BACKBONE (TFA/DeFRCN) *******")
+        logger.info(f"[Training] Backbone frozen params: {backbone_frozen}")
+        logger.info(f"[Training] Head trainable params: {head_trainable}")
+        logger.info("[Training] Research: Freeze backbone, train only head for few-shot")
 
         model.to(self.device)
         return model
@@ -357,16 +434,33 @@ class TrainingService:
 
         epochs = config.epochs
         learning_rate = config.learning_rate
+        warmup_iterations = getattr(config, "warmup_iterations", 1000)
 
         # Only optimize non-frozen params
         params = [p for p in model.parameters() if p.requires_grad]
         optimizer = torch.optim.Adam(params, lr=learning_rate)
-        logger.info(f"[Training] LR: {learning_rate}")
+
+        # WARMUP SCHEDULER - Research: critical for few-shot stability (1000-2000 iterations)
+        # Linear warmup from 1/10 of target LR to full LR
+        steps_per_epoch = len(train_loader)
+        total_steps = epochs * steps_per_epoch
+
+        def lr_lambda(step):
+            if step < warmup_iterations:
+                # Linear warmup: start at 0.1*LR, increase to 1.0*LR
+                return 0.1 + 0.9 * (step / max(warmup_iterations, 1))
+            return 1.0  # Full LR after warmup
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+        logger.info(f"[Training] LR: {learning_rate}, Warmup: {warmup_iterations} iterations")
+        logger.info(f"[Training] Steps/epoch: {steps_per_epoch}, Total steps: {total_steps}")
 
         best_f1 = 0.0
         best_state = None
         best_metrics = None
         patience_counter = 0
+        global_step = 0
 
         for epoch in range(epochs):
             if self._cancel_requested:
@@ -388,6 +482,8 @@ class TrainingService:
                 # Gradient clipping to prevent exploding gradients
                 torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
                 optimizer.step()
+                scheduler.step()  # Step warmup scheduler after each batch
+                global_step += 1
 
                 train_loss += losses.item()
 
@@ -412,7 +508,10 @@ class TrainingService:
             else:
                 patience_counter += 1
 
-            # Callback
+            # Callback - log here to confirm it's being called
+            logger.info(
+                f"[SERVICE] Epoch {epoch + 1}/{epochs} done, callback={callback is not None}"
+            )
             if callback:
                 elapsed = time.time() - start_time
                 progress = TrainingProgress(
@@ -426,7 +525,9 @@ class TrainingService:
                     is_best=is_best,
                     elapsed_sec=elapsed,
                 )
+                logger.info(f"[SERVICE] Calling callback for epoch {epoch + 1}...")
                 callback(progress)
+                logger.info(f"[SERVICE] Callback returned for epoch {epoch + 1}")
 
             logger.info(
                 f"Epoch {epoch + 1}/{epochs}: loss={train_loss:.4f}, f1={metrics['f1_score']:.3f}, P={metrics['precision']:.3f}, R={metrics['recall']:.3f}"

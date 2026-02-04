@@ -98,6 +98,13 @@ class TrainingSpectrogramState extends State<TrainingSpectrogram> {
   // Spectrogram data
   ui.Image? _displayImage;
   Uint8List? _pixelBuffer;
+
+  /// Export current spectrogram as PNG bytes for backend blob detection
+  Uint8List? get spectrogramPngBytes => _pixelBuffer;
+
+  /// Export spectrogram dimensions
+  int get spectrogramWidth => _spectrogramWidth;
+  int get spectrogramHeight => _spectrogramHeight;
   Float32List? _spectrogramData;
   int _spectrogramWidth = 0;  // Time dimension
   int _spectrogramHeight = 0; // Frequency dimension

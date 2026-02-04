@@ -18,6 +18,7 @@ class RxChannelState {
   final bool isConnected;
   final int? countdownSeconds;  // Countdown for manual mode timeout
   final String? errorMessage;
+  final bool isRecording;       // TRUE only when actively capturing to file
 
   const RxChannelState({
     required this.rxNumber,
@@ -27,6 +28,7 @@ class RxChannelState {
     this.isConnected = false,
     this.countdownSeconds,
     this.errorMessage,
+    this.isRecording = false,
   });
 
   RxChannelState copyWith({
@@ -37,6 +39,7 @@ class RxChannelState {
     bool? isConnected,
     int? countdownSeconds,
     String? errorMessage,
+    bool? isRecording,
   }) {
     return RxChannelState(
       rxNumber: rxNumber ?? this.rxNumber,
@@ -46,19 +49,27 @@ class RxChannelState {
       isConnected: isConnected ?? this.isConnected,
       countdownSeconds: countdownSeconds,  // Explicitly allow null
       errorMessage: errorMessage,
+      isRecording: isRecording ?? this.isRecording,
     );
   }
 
   /// Display string for mode
+  /// NOTE: Shows "REC" only when isRecording is true, otherwise shows "MAN" for manual tune
   String get modeDisplayString {
     switch (mode) {
       case RxMode.scanning:
         return '🤖 SCAN';
       case RxMode.manual:
-        if (countdownSeconds != null) {
-          return '🔴 ${countdownSeconds}s';  // Recording with countdown
+        if (isRecording) {
+          // Actually recording to file
+          if (countdownSeconds != null) {
+            return '🔴 ${countdownSeconds}s';  // Recording with countdown
+          }
+          return '🔴 REC';  // Recording (no countdown = permanent)
+        } else {
+          // Just manually tuned, not recording
+          return '📻 MAN';  // Manual tune (listening, not recording)
         }
-        return '🔴 REC';  // Manual recording (no countdown = permanent)
       case RxMode.idle:
         return '⏸️ IDLE';
       case RxMode.error:

@@ -4,13 +4,19 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/theme.dart';
 import '../../core/database/signal_database.dart';
 import '../../core/services/rfcap_service.dart';
 import '../live_detection/providers/map_provider.dart' show getSOIColor;
-import '../live_detection/providers/sdr_config_provider.dart';
 import 'providers/training_provider.dart' as tp;
+import 'providers/crop_classifier_provider.dart';
 import 'widgets/training_spectrogram.dart';
+import 'widgets/model_selection_dialog.dart';
+import 'widgets/crop_review_dialog.dart';
+
+/// Key for persisting last loaded file
+const _kLastLoadedFileKey = 'training_last_loaded_file';
 
 /// Training Screen - Label spectrogram data + Train
 class TrainingScreen extends ConsumerStatefulWidget {
@@ -42,9 +48,38 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   @override
   void initState() {
     super.initState();
+    _loadLastLoadedFile();
     _loadAvailableFiles();
+    // Load available crop classifier models from disk
+    ref.read(cropClassifierProvider.notifier).loadAvailableModelsFromDisk();
     // Auto-refresh file list every 5 seconds (will pick up new captures)
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadAvailableFiles());
+  }
+
+  /// Load last loaded file from SharedPreferences
+  Future<void> _loadLastLoadedFile() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastFile = prefs.getString(_kLastLoadedFileKey);
+      if (lastFile != null && await File(lastFile).exists()) {
+        debugPrint('[Training] 📂 Restoring last loaded file: $lastFile');
+        setState(() => _selectedFile = lastFile);
+        _loadFileHeader(lastFile);
+      }
+    } catch (e) {
+      debugPrint('[Training] Error loading last file: $e');
+    }
+  }
+
+  /// Save last loaded file to SharedPreferences
+  Future<void> _saveLastLoadedFile(String filepath) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kLastLoadedFileKey, filepath);
+      debugPrint('[Training] 💾 Saved last loaded file: $filepath');
+    } catch (e) {
+      debugPrint('[Training] Error saving last file: $e');
+    }
   }
 
   @override
@@ -269,6 +304,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     if (filepath != null && filepath != _selectedFile) {
       setState(() => _selectedFile = filepath);
       _loadFileHeader(filepath);
+      _saveLastLoadedFile(filepath);  // Persist for next app launch
     }
   }
 
@@ -316,7 +352,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     });
   }
 
-  void _startTraining() {
+  void _startTraining() async {
     if (_labelBoxes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -338,7 +374,316 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       return;
     }
 
-    _doRealTraining();
+    // Step 1: Show model selection dialog with duration options
+    final cropState = ref.read(cropClassifierProvider);
+    final fileDuration = _loadedHeader?.durationSec ?? 60.0;
+    final modelResult = await showModelSelectionDialog(
+      context: context,
+      currentClassName: className,
+      existingModels: cropState.availableModels,
+      fileDurationSec: fileDuration,
+    );
+
+    if (modelResult == null || !mounted) return; // User cancelled
+
+    // Step 2: Update class name if user picked a new model name
+    if (modelResult.isNew && modelResult.modelName != className) {
+      _classNameController.text = modelResult.modelName;
+      _updateAllBoxClasses(modelResult.modelName);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // BOOTSTRAP FLOW: Use user's drawn boxes as seeds for template matching
+    // ─────────────────────────────────────────────────────────────────
+    final useBootstrap = _labelBoxes.length >= 3; // Need at least 3 seeds
+
+    if (useBootstrap) {
+      await _runBootstrapFlow(modelResult);
+    } else {
+      // Fallback: use original blob detection flow
+      await _runLegacyBlobFlow(modelResult);
+    }
+  }
+
+  /// BOOTSTRAP FLOW: Use user's drawn boxes as seed templates
+  Future<void> _runBootstrapFlow(ModelSelectionResult modelResult) async {
+    debugPrint('[Training] 🌱 BOOTSTRAP MODE: Using ${_labelBoxes.length} boxes as seed templates');
+
+    bool dialogOpen = false;
+
+    try {
+      final cropNotifier = ref.read(cropClassifierProvider.notifier);
+
+      // Convert LabelBox to seed box format (normalized 0-1 coords)
+      // Backend will convert to pixel coords based on its spectrogram dimensions
+      final seedBoxes = _labelBoxes.map((box) => <String, double>{
+        'x1': box.x1,
+        'y1': box.y1,
+        'x2': box.x2,
+        'y2': box.y2,
+      }).toList();
+
+      // Get current view window from spectrogram
+      // Default: 0s start, 0.5s duration (matches backend default)
+      final timeStartSec = 0.0; // TODO: Get from TrainingSpectrogram._windowStartSec
+      final timeDurationSec = 0.5; // TODO: Get from TrainingSpectrogram._windowLengthSec
+
+      // Show progress dialog
+      if (mounted) {
+        dialogOpen = true;
+        unawaited(showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: G20Colors.surfaceDark,
+            title: const Text('🌱 Finding similar signals...',
+              style: TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const LinearProgressIndicator(
+                  backgroundColor: G20Colors.cardDark,
+                  valueColor: AlwaysStoppedAnimation(G20Colors.primary),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Using ${_labelBoxes.length} seed boxes as templates',
+                  style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ));
+      }
+
+      // Call bootstrap_file with seed boxes (normalized 0-1 coords)
+      final bootstrapResult = await cropNotifier.bootstrapFromFile(
+        rfcapPath: _selectedFile!,
+        seedBoxes: seedBoxes,
+        timeStartSec: timeStartSec,
+        timeDurationSec: timeDurationSec,
+        topK: 50,
+      );
+
+      // Close progress dialog
+      if (dialogOpen && mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+        dialogOpen = false;
+      }
+
+      debugPrint('[Training] 📋 Bootstrap found ${bootstrapResult.candidates.length} candidates');
+
+      if (bootstrapResult.candidates.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No similar signals found. Try drawing more boxes or different positions.'),
+              backgroundColor: G20Colors.warning,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Show swipe dialog with BOOTSTRAP candidates (pre-sorted by similarity!)
+      final reviewResult = await showCropReviewDialog(
+        context: context,
+        crops: bootstrapResult.toCropReviewDataList(),
+      );
+
+      if (reviewResult == null || !mounted) {
+        debugPrint('[Training] ❌ User cancelled crop review');
+        return;
+      }
+
+      // Get confirmed/rejected indices from reviewResult
+      final confirmedIndices = <int>[];
+      final rejectedIndices = <int>[];
+
+      for (final entry in reviewResult.labels.entries) {
+        // Extract index from crop ID (format: "bootstrap_N")
+        final idParts = entry.key.split('_');
+        if (idParts.length >= 2) {
+          final idx = int.tryParse(idParts.last);
+          if (idx != null) {
+            if (entry.value) {
+              confirmedIndices.add(idx);
+            } else {
+              rejectedIndices.add(idx);
+            }
+          }
+        }
+      }
+
+      debugPrint('[Training] ✅ Swipe complete: ${confirmedIndices.length} confirmed, '
+          '${rejectedIndices.length} rejected');
+
+      // Record confirmations with backend
+      final stats = await cropNotifier.confirmLabels(
+        confirmed: confirmedIndices,
+        rejected: rejectedIndices,
+      );
+
+      debugPrint('[Training] 📊 Stats after confirm: positives=${stats.positives}, '
+          'negatives=${stats.negatives}, ready=${stats.readyToTrain}');
+
+      // Proceed to training if ready
+      if (stats.readyToTrain || (stats.positives >= 5 && stats.negatives >= 5)) {
+        debugPrint('[Training] 🚀 Ready to train!');
+        _doRealTraining();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Need more labels: ${stats.positives} positives, ${stats.negatives} negatives. Draw more boxes or confirm more candidates.'),
+              backgroundColor: G20Colors.warning,
+            ),
+          );
+        }
+      }
+
+    } catch (e) {
+      if (dialogOpen && mounted) {
+        try {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        } catch (_) {}
+        dialogOpen = false;
+      }
+
+      debugPrint('[Training] ❌ Bootstrap error: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Bootstrap failed: $e'),
+            backgroundColor: G20Colors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Legacy flow: Scan entire file for blobs (slower, less targeted)
+  Future<void> _runLegacyBlobFlow(ModelSelectionResult modelResult) async {
+    debugPrint('[Training] 🔍 LEGACY MODE: Scanning ${modelResult.scanDurationSec}s for blob detection...');
+
+    bool dialogOpen = false;
+    double currentProgress = 0.0;
+    int cropsFoundSoFar = 0;
+    StateSetter? dialogSetState;
+
+    try {
+      final cropNotifier = ref.read(cropClassifierProvider.notifier);
+      final totalChunks = (modelResult.scanDurationSec / 0.5).ceil();
+
+      if (mounted) {
+        dialogOpen = true;
+        unawaited(showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => StatefulBuilder(
+            builder: (ctx, setState) {
+              dialogSetState = setState;
+              final processedChunks = (currentProgress * totalChunks).round();
+              return AlertDialog(
+                backgroundColor: G20Colors.surfaceDark,
+                title: const Text('🔍 Scanning for signals...',
+                  style: TextStyle(color: G20Colors.textPrimaryDark, fontSize: 16)),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    LinearProgressIndicator(
+                      value: currentProgress,
+                      backgroundColor: G20Colors.cardDark,
+                      valueColor: const AlwaysStoppedAnimation(G20Colors.primary),
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Chunk $processedChunks/$totalChunks',
+                      style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Text('${(currentProgress * 100).toInt()}% • $cropsFoundSoFar signals found',
+                      style: const TextStyle(color: G20Colors.textPrimaryDark, fontSize: 14, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              );
+            },
+          ),
+        ));
+      }
+
+      final crops = await cropNotifier.detectCropsFromFile(
+        rfcapPath: _selectedFile!,
+        scanDurationSec: modelResult.scanDurationSec,
+        progressCallback: (progress, cropsFound) {
+          currentProgress = progress;
+          cropsFoundSoFar = cropsFound;
+          if (dialogSetState != null) {
+            try { dialogSetState!(() {}); } catch (_) {}
+          }
+        },
+      );
+
+      if (dialogOpen && mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+        dialogOpen = false;
+      }
+
+      if (crops.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No signals detected. Try drawing boxes for bootstrap mode.'),
+              backgroundColor: G20Colors.warning,
+            ),
+          );
+        }
+        return;
+      }
+
+      final reviewResult = await showCropReviewDialog(context: context, crops: crops);
+
+      if (reviewResult == null || !mounted) return;
+
+      if (reviewResult.labels.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No crops labeled.'),
+              backgroundColor: G20Colors.warning,
+            ),
+          );
+        }
+        return;
+      }
+
+      _doRealTraining();
+
+    } catch (e) {
+      if (dialogOpen && mounted) {
+        try {
+          if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+        } catch (_) {}
+      }
+
+      debugPrint('[Training] ❌ Error: $e');
+
+      if (mounted) {
+        final errorStr = e.toString();
+        final isConnectionError = errorStr.contains('refused') || errorStr.contains('SocketException');
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isConnectionError
+              ? 'Backend not running! Run: python backend/server.py'
+              : 'Detection failed: $e'),
+            backgroundColor: G20Colors.error,
+          ),
+        );
+      }
+    }
   }
 
   void _doRealTraining() async {
@@ -349,9 +694,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     final header = _loadedHeader!;
 
     // Convert LabelBox to the format expected by training provider
-    // CRITICAL: Python's sample_manager uses a FIXED 0.1s window centered on the box.
-    // We just need to send the correct center time - Python handles the windowing.
-    //
     // For OLD boxes with null timeStartSec: we can't recover the original time,
     // so log a warning and skip them (user needs to redraw).
     final validBoxes = <Map<String, dynamic>>[];
@@ -772,30 +1114,32 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         ),
         const SizedBox(height: 8),
 
-        // Training preset selector
+        // Training preset selector (4 presets: Fast, Balanced, Quality, Extreme)
         const Text('Preset', style: TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11)),
         const SizedBox(height: 4),
         Row(
           children: tp.TrainingPreset.values.map((preset) {
             final isSelected = preset == _selectedPreset;
+            final isFirst = preset == tp.TrainingPreset.fast;
+            final isLast = preset == tp.TrainingPreset.extreme;
             return Expanded(
               child: GestureDetector(
                 onTap: isTraining ? null : () => setState(() => _selectedPreset = preset),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
                     color: isSelected ? G20Colors.primary.withOpacity(0.3) : G20Colors.backgroundDark,
                     border: Border.all(color: isSelected ? G20Colors.primary : G20Colors.cardDark),
                     borderRadius: BorderRadius.horizontal(
-                      left: preset == tp.TrainingPreset.fast ? const Radius.circular(4) : Radius.zero,
-                      right: preset == tp.TrainingPreset.quality ? const Radius.circular(4) : Radius.zero,
+                      left: isFirst ? const Radius.circular(4) : Radius.zero,
+                      right: isLast ? const Radius.circular(4) : Radius.zero,
                     ),
                   ),
                   child: Text(
                     preset.label,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 9,  // Smaller font to fit 4 presets
                       color: isSelected ? G20Colors.primary : G20Colors.textSecondaryDark,
                       fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     ),
@@ -812,37 +1156,90 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
             builder: (context, ref, _) {
               final state = ref.watch(tp.trainingProvider);
               final progress = state.overallProgress;
+              final epochProgress = state.progress;
+              final currentEpoch = epochProgress?.epoch ?? 0;
+              final totalEpochs = epochProgress?.totalEpochs ?? _selectedPreset.epochs;
+              final currentF1 = epochProgress?.f1Score ?? 0.0;
+
+              // Check if training is complete (all epochs done)
+              final isComplete = currentEpoch >= totalEpochs && totalEpochs > 0 && !state.isSavingSamples;
+
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Progress bar
                   LinearProgressIndicator(
                     value: progress.isNaN ? null : progress,
                     backgroundColor: G20Colors.cardDark,
-                    valueColor: const AlwaysStoppedAnimation(G20Colors.primary),
+                    valueColor: AlwaysStoppedAnimation(isComplete ? G20Colors.success : G20Colors.primary),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    state.statusText,
-                    style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
+                  // Epoch X/N - F1: 0.XXX
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${(progress * 100).toInt()}%',
-                        style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 11)),
-                      ElevatedButton(
-                        onPressed: _stopTraining,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: G20Colors.error,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      Text(
+                        state.isSavingSamples
+                          ? 'Saving ${state.samplesSaved}/${state.totalSamplesToSave}'
+                          : isComplete
+                            ? 'Complete! $totalEpochs epochs'
+                            : 'Epoch $currentEpoch/$totalEpochs',
+                        style: TextStyle(
+                          color: isComplete ? G20Colors.success : G20Colors.textPrimaryDark,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
                         ),
-                        child: const Text('Stop', style: TextStyle(fontSize: 12)),
+                      ),
+                      Text(
+                        'F1: ${currentF1.toStringAsFixed(3)}',
+                        style: TextStyle(
+                          color: currentF1 > 0.7 ? G20Colors.success : (currentF1 > 0.4 ? G20Colors.warning : G20Colors.textSecondaryDark),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 6),
+                      // Best F1 indicator + Stop button (only during training)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Best F1 indicator (always show best so far)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: state.bestF1 > 0 ? G20Colors.success.withOpacity(0.2) : G20Colors.cardDark,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (epochProgress?.isBest == true || isComplete)
+                                  const Text('★ ', style: TextStyle(color: G20Colors.success, fontSize: 10)),
+                                Text(
+                                  'Best: ${state.bestF1.toStringAsFixed(3)}',
+                                  style: TextStyle(
+                                    color: state.bestF1 > 0.7 ? G20Colors.success : G20Colors.textSecondaryDark,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Only show Stop button during training (not when complete)
+                          if (!isComplete)
+                            ElevatedButton(
+                              onPressed: _stopTraining,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: G20Colors.error,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              ),
+                              child: const Text('Stop', style: TextStyle(fontSize: 12)),
+                            ),
+                        ],
+                      ),
                 ],
               );
             },

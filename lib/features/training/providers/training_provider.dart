@@ -20,6 +20,7 @@ class TrainingState {
   final TrainingProgress? progress;
   final TrainingResult? lastResult;
   final String? error;
+  final double bestF1;  // Track best F1 across training run
 
   const TrainingState({
     this.isConnected = false,
@@ -30,6 +31,7 @@ class TrainingState {
     this.progress,
     this.lastResult,
     this.error,
+    this.bestF1 = 0.0,
   });
 
   TrainingState copyWith({
@@ -41,6 +43,7 @@ class TrainingState {
     TrainingProgress? progress,
     TrainingResult? lastResult,
     String? error,
+    double? bestF1,
   }) {
     return TrainingState(
       isConnected: isConnected ?? this.isConnected,
@@ -51,6 +54,7 @@ class TrainingState {
       progress: progress ?? this.progress,
       lastResult: lastResult ?? this.lastResult,
       error: error,
+      bestF1: bestF1 ?? this.bestF1,
     );
   }
 
@@ -163,25 +167,92 @@ class TrainingResult {
 }
 
 /// Training preset options (research-based)
+///
+/// Based on research from:
+/// - TFA (ICML 2020): Frozen backbone fine-tuning, LR=0.001
+/// - DeFRCN (ICCV 2021): Gradient decoupling
+/// - Few-shot warmup: 1000-2000 iterations for stability
 enum TrainingPreset {
   /// Quick validation (~1-2 min)
-  /// High LR (0.005), batch 8, patience 2
-  fast('fast', 'Fast', '~1-2 min', 15),
+  /// LR 0.001 (research standard), batch 8, patience 2, warmup 500
+  fast(
+    value: 'fast',
+    label: 'Fast',
+    description: '~1-2 min',
+    epochs: 15,
+    learningRate: 0.001,
+    batchSize: 8,
+    earlyStopPatience: 2,
+    warmupIterations: 500,
+  ),
 
   /// Production default (~3-5 min)
-  /// TFA/CFA standard LR (0.001), batch 4, patience 5
-  balanced('balanced', 'Balanced', '~3-5 min', 30),
+  /// TFA/CFA standard LR (0.001), batch 4, patience 5, warmup 1000
+  balanced(
+    value: 'balanced',
+    label: 'Balanced',
+    description: '~3-5 min',
+    epochs: 30,
+    learningRate: 0.001,
+    batchSize: 4,
+    earlyStopPatience: 5,
+    warmupIterations: 1000,
+  ),
 
   /// Maximum accuracy (~10-15 min)
-  /// Lower LR (0.0005), batch 2, patience 10
-  quality('quality', 'Quality', '~10-15 min', 75);
+  /// LR 0.001 (research standard), batch 4, patience 10, warmup 1500
+  quality(
+    value: 'quality',
+    label: 'Quality',
+    description: '~10-15 min',
+    epochs: 75,
+    learningRate: 0.001,
+    batchSize: 4,
+    earlyStopPatience: 10,
+    warmupIterations: 1500,
+  ),
+
+  /// Extended training for difficult signals (~25-40 min)
+  /// Lower LR (0.0005), batch 2, patience 20, warmup 2000
+  extreme(
+    value: 'extreme',
+    label: 'Extreme',
+    description: '~25-40 min',
+    epochs: 150,
+    learningRate: 0.0005,
+    batchSize: 2,
+    earlyStopPatience: 20,
+    warmupIterations: 2000,
+  );
 
   final String value;
   final String label;
   final String description;
-  final int expectedEpochs;
+  final int epochs;
+  final double learningRate;
+  final int batchSize;
+  final int earlyStopPatience;
+  final int warmupIterations;
 
-  const TrainingPreset(this.value, this.label, this.description, this.expectedEpochs);
+  const TrainingPreset({
+    required this.value,
+    required this.label,
+    required this.description,
+    required this.epochs,
+    required this.learningRate,
+    required this.batchSize,
+    required this.earlyStopPatience,
+    required this.warmupIterations,
+  });
+
+  /// Convert to JSON for WebSocket message (gRPC-style explicit params)
+  Map<String, dynamic> toJson() => {
+    'epochs': epochs,
+    'learning_rate': learningRate,
+    'batch_size': batchSize,
+    'early_stop_patience': earlyStopPatience,
+    'warmup_iterations': warmupIterations,
+  };
 }
 
 /// Box to send to backend (REAL-WORLD UNITS - seconds and MHz)
@@ -346,7 +417,17 @@ class TrainingNotifier extends StateNotifier<TrainingState> {
 
         case 'training_progress':
           final progress = TrainingProgress.fromJson(data);
-          state = state.copyWith(progress: progress, isTraining: true, isSavingSamples: false);
+          // DEBUG: Log every epoch update
+          print('[Training] 📊 EPOCH ${progress.epoch}/${progress.totalEpochs} - F1=${progress.f1Score.toStringAsFixed(3)} isBest=${progress.isBest}');
+          // Track best F1 across entire training run
+          final newBestF1 = progress.isBest ? progress.f1Score : state.bestF1;
+          state = state.copyWith(
+            progress: progress,
+            isTraining: true,
+            isSavingSamples: false,
+            bestF1: newBestF1,
+          );
+          print('[Training] 📊 State updated: epoch=${state.progress?.epoch} bestF1=${state.bestF1}');
           break;
 
         case 'training_complete':
@@ -505,17 +586,22 @@ class TrainingNotifier extends StateNotifier<TrainingState> {
       isSavingSamples: false,
       progress: null,
       error: null,
+      bestF1: 0.0,  // Reset best F1 for new training run
     );
 
     _trainCompleter = Completer<void>();
 
-    debugPrint('[Training] Starting with preset: ${preset.label}');
+    // DEBUG: Log the full training_config being sent
+    final trainingConfig = preset.toJson();
+    print('[Training] 🚀 SENDING train_signal with config: $trainingConfig');
+    print('[Training] 🚀 Preset: ${preset.label}, epochs=${preset.epochs}');
 
+    // Send explicit training config (gRPC-style) - no preset lookup on Python side!
     _send({
       'command': 'train_signal',
       'signal_name': signalName,
-      'preset': preset.value,  // Send preset to backend
       'is_new': isNew,
+      'training_config': trainingConfig,  // Explicit values from preset
       'notes': notes,
     });
 

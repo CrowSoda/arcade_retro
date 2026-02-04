@@ -210,13 +210,15 @@ class HydraDetector:
         # Create FasterRCNN model with ResNet18-FPN backbone
         backbone = resnet_fpn_backbone("resnet18", weights=None, trainable_layers=0)
 
-        # Custom anchor generator for narrow signal boxes (~12x84 pixels, aspect ~0.15)
-        # MUST match training config in training/service.py:
-        # - 5 sizes per FPN level × 4 aspect ratios = 20 anchors per location
-        # - Default FasterRCNN only has 3 anchors (1 size × 3 ratios)
+        # Wide-coverage default anchors - covers aspect ratios from 0.1 (wide) to 4.0 (tall)
+        # NOTE: Per-head anchors are loaded dynamically when switching heads
+        # These defaults cover the common signal shapes for initial model creation
+        default_sizes = (31, 44, 54, 70, 77, 63, 40, 70, 70)  # From get_default_anchors()
+        default_aspects = (0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 4.0, 0.5, 2.0)
+
         anchor_generator = AnchorGenerator(
-            sizes=((8, 16, 32, 64, 128),) * 5,  # Same sizes for all 5 FPN levels
-            aspect_ratios=((0.1, 0.15, 0.2, 0.3),) * 5,  # Same aspects for all 5 FPN levels
+            sizes=(default_sizes,) * 5,  # Same anchors for all 5 FPN levels
+            aspect_ratios=(default_aspects,) * 5,
         )
 
         self.model = FasterRCNN(

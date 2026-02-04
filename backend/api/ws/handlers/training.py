@@ -111,9 +111,16 @@ async def _ws_training_handler_impl(websocket):
         )
 
     training_task = None
+    # Get the event loop for thread-safe callbacks
+    main_loop = asyncio.get_running_loop()
 
-    def make_progress_callback(ws):
-        """Create callback for training progress updates."""
+    def make_progress_callback(ws, loop):
+        """Create thread-safe callback for training progress updates.
+
+        Uses asyncio.run_coroutine_threadsafe() because training runs in
+        a thread pool via asyncio.to_thread(), so callbacks execute in
+        that thread - not the main event loop thread.
+        """
 
         async def send_progress(progress):
             try:
@@ -140,10 +147,18 @@ async def _ws_training_handler_impl(websocket):
                 logger.info(f"Training: Progress send error: {e}")
 
         def callback(progress):
+            # FIX: Use run_coroutine_threadsafe for cross-thread callback
+            # This is called from the training thread, not the main event loop
+            logger.info(
+                f"Training: [CALLBACK] Epoch {progress.epoch}/{progress.total_epochs} F1={progress.f1_score:.3f}"
+            )
             try:
-                asyncio.get_event_loop().create_task(send_progress(progress))
-            except RuntimeError:
-                pass
+                future = asyncio.run_coroutine_threadsafe(send_progress(progress), loop)
+                # Wait briefly to ensure message is sent
+                future.result(timeout=2.0)
+                logger.info(f"Training: [CALLBACK] Message sent for epoch {progress.epoch}")
+            except Exception as e:
+                logger.info(f"Training: [CALLBACK] ERROR: {e}")
 
         return callback
 
@@ -287,16 +302,54 @@ async def _ws_training_handler_impl(websocket):
                         )
                         continue
 
+                    # Extract explicit training config from message (gRPC-style)
+                    # Falls back to defaults if not provided
+                    training_config = data.get("training_config", {})
+
+                    # DEBUG: Log what we received from Flutter
+                    logger.info(f"Training: RAW training_config from Flutter: {training_config}")
+                    logger.info(f"Training: Full message data keys: {list(data.keys())}")
+
+                    epochs = training_config.get("epochs", 30)
+                    learning_rate = training_config.get("learning_rate", 0.001)
+                    batch_size = training_config.get("batch_size", 4)
+                    early_stop_patience = training_config.get("early_stop_patience", 5)
+                    warmup_iterations = training_config.get("warmup_iterations", 1000)
+
+                    logger.info(
+                        f"Training: PARSED config: epochs={epochs}, lr={learning_rate}, batch={batch_size}, warmup={warmup_iterations}"
+                    )
+
                     async def run_training():
                         try:
-                            callback = make_progress_callback(websocket)
+                            # FIX: Pass main_loop for thread-safe callback
+                            callback = make_progress_callback(websocket, main_loop)
+
+                            # FIX: Use asyncio.to_thread() to run blocking training in thread pool
+                            # Pass explicit config values (not preset lookup)
                             if is_new:
-                                result = training_service.train_new_signal(
-                                    signal_name, notes=notes, callback=callback
+                                result = await asyncio.to_thread(
+                                    training_service.train_new_signal,
+                                    signal_name=signal_name,
+                                    epochs=epochs,
+                                    learning_rate=learning_rate,
+                                    batch_size=batch_size,
+                                    early_stop_patience=early_stop_patience,
+                                    warmup_iterations=warmup_iterations,
+                                    notes=notes,
+                                    callback=callback,
                                 )
                             else:
-                                result = training_service.extend_signal(
-                                    signal_name, notes=notes, callback=callback
+                                result = await asyncio.to_thread(
+                                    training_service.extend_signal,
+                                    signal_name=signal_name,
+                                    epochs=epochs,
+                                    learning_rate=learning_rate,
+                                    batch_size=batch_size,
+                                    early_stop_patience=early_stop_patience,
+                                    warmup_iterations=warmup_iterations,
+                                    notes=notes,
+                                    callback=callback,
                                 )
 
                             await websocket.send(

@@ -122,7 +122,9 @@ void showFadingToast(BuildContext context, String message, {IconData icon = Icon
 }
 
 /// Show capture warning dialog - returns true if user confirms, false if cancelled
-Future<bool> showCaptureWarningDialog(BuildContext context, ManualCaptureState captureState) async {
+/// [rxName] - Name of the receiver (e.g., "RX-2") - defaults to "RX-2"
+Future<bool> showCaptureWarningDialog(BuildContext context, ManualCaptureState captureState, {String? rxName}) async {
+  final rx = rxName ?? 'RX-2';
   final result = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -139,7 +141,7 @@ Future<bool> showCaptureWarningDialog(BuildContext context, ManualCaptureState c
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('RX-2 is currently capturing ${captureState.signalName ?? "data"}.',
+          Text('$rx is currently capturing ${captureState.signalName ?? "data"}.',
             style: const TextStyle(color: G20Colors.textSecondaryDark)),
           const SizedBox(height: 12),
           const Text('Tuning will end and save the current capture.',
@@ -148,7 +150,7 @@ Future<bool> showCaptureWarningDialog(BuildContext context, ManualCaptureState c
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                'Queued captures (${captureState.queueLength}) will resume once RX-2 is free.',
+                'Queued captures (${captureState.queueLength}) will resume once $rx is free.',
                 style: const TextStyle(color: G20Colors.textSecondaryDark, fontSize: 12),
               ),
             ),
